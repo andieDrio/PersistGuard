@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "@fontsource-variable/inter";
 import "./styles.css";
+import { PersistGuardFooter } from "./persistguard-footer";
 
 export const metadata: Metadata = {
   title: "Scan history | PersistGuard",
@@ -9,12 +10,8 @@ export const metadata: Metadata = {
 
 // Centralized, non-editable footer shared by every dashboard route.
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const year = new Date().getFullYear();
   return <html lang="en"><body>
     {children}
-    <footer className="persistguard-footer" aria-label="PersistGuard footer">
-      <span>Cybersecurity is everyone Responsibility</span>
-      <span>Powered by: apm @ {year}</span>
-    </footer>
+    <PersistGuardFooter />
   </body></html>;
 }
