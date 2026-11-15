@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 // Centralized, non-editable footer shared by every dashboard route.
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {
   return <html lang="en"><body>
-    {children}
+    <div className="app-scroll" role="region" aria-label="PersistGuard workspace" tabIndex={0}>{children}</div>
     <PersistGuardFooter />
   </body></html>;
 }

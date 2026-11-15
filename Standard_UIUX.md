@@ -200,15 +200,16 @@ The PersistGuard GUI must render the same non-editable footer on every route, th
 - Exact second-line prefix: `Powered by: apm @ ` followed by the current calendar year.
 - The year must refresh automatically while the browser remains open across a year boundary.
 - The footer stays at the bottom of the viewport when content is short, remains visible while scrolling, and adapts to narrow screens without obscuring content.
+- The dashboard scrollbar ends at the top edge of the footer. The footer spans the full viewport width below the scrolling region.
 - Only a reviewed source-code change may modify the locked wording or remove the footer; it is not configurable through dashboard settings.
 
 
 
 ## Locked Sidebar and Top Navigation
 
-Preserve the original dashboard layout, page content sizing, spacing, and scroll behavior. Navigation locking must not replace the page with a viewport-sized grid, center previously top-aligned content, or clip existing views.
+Preserve the original dashboard layout, page content sizing, and spacing within the scrolling region. Keep page content top-aligned and reachable at each breakpoint.
 
-- Desktop sidebar remains anchored using sticky positioning and does not independently scroll.
+- Desktop sidebar remains anchored using sticky positioning. Its navigation list scrolls when the viewport is too short to show all links.
 - Top navigation remains visible using sticky positioning.
 - Footer wording and year behavior remain unchanged.
 - Responsive navigation keeps its original sizing and wrapping; avoid clipping links.

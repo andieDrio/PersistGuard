@@ -253,7 +253,7 @@ class AuthenticationTests(unittest.TestCase):
             )
 
     @unittest.skipUnless(TEST_DATABASE_URL, "Requires a migrated PostgreSQL test database")
-    def test_admin_issues_client_certificate_for_own_endpoint(self):
+    def test_admin_issues_and_revokes_client_credentials_for_own_endpoint(self):
         engine = create_engine(TEST_DATABASE_URL)
         self.addCleanup(engine.dispose)
         self.enterContext(patch.dict(os.environ, {"PERSISTGUARD_DATABASE_URL": TEST_DATABASE_URL}))
@@ -262,6 +262,7 @@ class AuthenticationTests(unittest.TestCase):
         def remove_test_accounts():
             with engine.begin() as connection:
                 ids = [organization_id, other_id]
+                connection.execute(delete(ScanJob).where(ScanJob.organization_id == organization_id))
                 connection.execute(delete(AgentCredential).where(AgentCredential.endpoint_id == endpoint_id))
                 connection.execute(delete(Endpoint).where(Endpoint.organization_id.in_(ids)))
                 connection.execute(delete(AuditEvent).where(AuditEvent.organization_id.in_(ids)))
@@ -350,9 +351,46 @@ class AuthenticationTests(unittest.TestCase):
             self.assertEqual(credential.endpoint_id, endpoint_id)
             event = session.scalars(select(AuditEvent).where(AuditEvent.target_id == endpoint_id)).one()
             self.assertEqual((event.actor_id, event.action, event.status_code), (admin_id, "agent_credentials.issue", 201))
-            credential.revoked_at = now
+            old_serial = uuid4().hex
+            session.add(AgentCredential(endpoint_id=endpoint_id, certificate_serial=old_serial,
+                                        certificate_pem=credential.certificate_pem, expires_at=now,
+                                        superseded_at=now))
 
+        scan_route = f"/api/endpoints/{endpoint_id}/scan-jobs"
+        completed_id = self.client.post(scan_route, headers=headers).json()["id"]
+        with Session(engine) as session, session.begin():
+            session.execute(update(ScanJob).where(ScanJob.id == completed_id).values(status="completed", finished_at=now))
+        open_id = self.client.post(scan_route, headers=headers).json()["id"]
+        with Session(engine) as session, session.begin():
+            session.execute(update(ScanJob).where(ScanJob.id == open_id).values(status="dispatched"))
+        revoke_route = f"/api/endpoints/{endpoint_id}/revoke"
+        self.assertEqual(self.client.post(revoke_route).status_code, 401)
+        self.assertEqual(self.client.post(revoke_route, headers={"Authorization": f"Bearer {token}"}).status_code, 403)
+        self.assertEqual(self.client.post(f"/api/endpoints/{foreign_id}/revoke", headers=headers).status_code, 404)
+        with patch.object(Session, "commit", side_effect=SQLAlchemyError("Audit commit failed")):
+            self.assertEqual(self.client.post(revoke_route, headers=headers).status_code, 503)
+        self.assertEqual(self.client.get(f"/api/scan-jobs/{open_id}", headers=headers).json()["status"], "dispatched")
+        self.assertEqual(self.client.get("/api/endpoints?status=approved", headers=headers).json(), approved)
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(workers.map(lambda _: self.client.post(revoke_route, headers=headers), range(2)))
+        for result in results:
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.json(), {"endpoint_id": str(endpoint_id), "status": "revoked"})
+        revoked = self.client.get("/api/endpoints?status=revoked", headers=headers).json()
+        self.assertEqual([(device["id"], device["status"]) for device in revoked], [(str(endpoint_id), "revoked")])
+        self.assertEqual(self.client.get("/api/endpoints?status=approved", headers=headers).json(), [])
         self.assertEqual(self.client.put(route, headers=headers).status_code, 409)
+        self.assertEqual(self.client.post(scan_route, headers=headers).status_code, 409)
+        self.assertEqual(self.client.get(f"/api/scan-jobs/{completed_id}", headers=headers).json()["status"], "completed")
+        self.assertEqual(self.client.get(f"/api/scan-jobs/{open_id}", headers=headers).json()["status"], "canceled")
+        with Session(engine) as session:
+            self.assertIsNotNone(session.get(AgentCredential, issued["certificate_serial"]).revoked_at)
+            self.assertIsNotNone(session.get(AgentCredential, old_serial).revoked_at)
+            event = session.scalars(select(AuditEvent).where(
+                AuditEvent.target_id == endpoint_id, AuditEvent.action == "endpoints.revoke",
+            )).one()
+            self.assertEqual((event.actor_id, event.status_code), (admin_id, 200))
 
     @unittest.skipUnless(TEST_DATABASE_URL, "Requires a migrated PostgreSQL test database")
     def test_scan_queue_enforces_roles_and_tenant_scope_and_deduplicates_requests(self):

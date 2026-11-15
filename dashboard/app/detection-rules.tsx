@@ -277,6 +277,10 @@ export function DetectionRules({ token }: { token: string }) {
   const locked = busy || loading;
   const historyRule = data?.rules.find(rule => rule.id === historyId);
   const hasDraft = selected && selected.draft_version !== selected.published_version;
+  const feedback = <>
+    {error && <p className="api-error rules-message" role="alert">{error}</p>}
+    {notice && <p className="action-notice rules-message" role="status">{notice}</p>}
+  </>;
 
   return <section className="panel rules-panel" aria-labelledby="custom-rules-title">
     <div className="table-heading"><h2 id="custom-rules-title">Custom rules</h2><div className="heading-actions">
@@ -300,6 +304,7 @@ export function DetectionRules({ token }: { token: string }) {
           onClick={() => void downloadYAML(rule)}><Download size={15} />Export draft</button>}
         {data.can_manage && <button type="button" className="button" disabled={locked} aria-label={`Edit ${rule.name}`} onClick={() => open(rule)}>Edit</button>}</div></td>
     </tr>)}</tbody></table></div>}
+    {!editing && feedback}
     {historyRule && <RuleHistory key={`${historyRule.id}-${historyRule.published_version}-${refresh}`} rule={historyRule} token={token}
       exporting={locked || exporting} exportVersion={data?.can_manage ? version => void downloadYAML(historyRule, version) : undefined} rollbackVersion={data?.can_manage ? version => void rollbackVersion(historyRule, version) : undefined} />}
     {importing && <RuleYAMLImport token={token} close={() => setImporting(false)} saved={rule => {
@@ -340,8 +345,7 @@ export function DetectionRules({ token }: { token: string }) {
           {selected.enabled && <button className="button" type="button" disabled={locked} onClick={() => void changeActivation(false)}>Disable rule</button>}</div>
         {matches && <p role="status">{matches.length} of {samples.length} samples matched.{matches.length > 0 ? ` Each match adds ${selected.score} points.` : ""}</p>}
       </form>}
-      {error && <p className="api-error rules-message" role="alert">{error}</p>}
-      {notice && <p className="action-notice rules-message" role="status">{notice}</p>}
+      {feedback}
     </div>}
   </section>;
 }

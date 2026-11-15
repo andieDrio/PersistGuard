@@ -91,6 +91,17 @@ type for visible Win32 services. If a service is visible but its configuration
 is inaccessible, the report retains its name and state and records the access
 issue. Windows can omit services when the account cannot query their status.
 
+To investigate a partial result, run the collector under the same Windows
+account as the agent and group the reported issues by operation and code.
+
+```powershell
+$services.coverage.issues | Group-Object -Property operation, code | Select-Object Count, Name
+```
+
+A `query_config` issue with code `access_denied` means Windows denied access
+to service configuration. The retained service entry can still provide its
+name and state. Command-based assessment requires a readable command line.
+
 ### Collect all Windows inventories in one run
 
 From `agent`, run the read-only collectors together. The command needs no
@@ -364,6 +375,14 @@ returns the same valid certificate with `200`. The certificate is valid for up
 to 24 hours and uses the verified device public key. Agent certificate delivery
 is manual at this stage.
 
+### Revoke an endpoint
+
+In **Endpoint onboarding → Approved**, choose **Revoke** for the endpoint and
+confirm. An Admin can also call `POST /api/endpoints/{endpoint_id}/revoke`.
+The endpoint moves to **Revoked**, the gateway rejects its device certificates,
+and unfinished scans are canceled. Existing scan assessments remain available.
+The action is audited and successful retries return the same revoked status.
+
 ## Run the mTLS gateway
 
 Run the gateway separately from the admin and enrollment API. It serves
@@ -527,6 +546,18 @@ inventory job from the dashboard and check for a receipt in the log to verify
 gateway access. To stop the worker, run `Stop-Service -Name 'PersistGuardAgent'`
 from elevated PowerShell.
 
+To verify Services coverage under the deployment account, identify the running
+service and its configured account on the endpoint.
+
+```powershell
+Get-CimInstance Win32_Service -Filter "Name = 'PersistGuardAgent'" | Select-Object Name, State, StartName
+```
+
+Use the service name from that installation. Queue a new inventory scan and
+match its ID to the service log receipt. In **Scan history → Coverage**, check
+the Windows Services collector status and issue codes for that scan. An
+interactive collector run measures the access of the account running it.
+
 ### Operations workspace
 
 Apply `alembic upgrade head` from `backend` for the Cases, IOCs, and detection rules tables. Connect
@@ -632,5 +663,20 @@ $env:PERSISTGUARD_TEST_DATABASE_URL = $env:PERSISTGUARD_DATABASE_URL
 python -m unittest discover -s tests -v
 python -m alembic check
 ```
+
+### Run dashboard browser tests
+
+```bash
+cd dashboard
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+The suite starts a production dashboard on loopback port 3416 and a fixture
+API on port 3415. It checks desktop and mobile footer boundaries, Admin
+revocation and rule rollback through the dashboard proxy, and role-based
+controls for Analyst and Viewer. The dashboard verification job runs the
+same suite in GitHub Actions.
 
 **Status:** PersistGuard supports Windows agent enrollment, manual inventory scans and uploads, and a local dashboard for scan history, assessment, and coverage. Do not use for production security decisions.

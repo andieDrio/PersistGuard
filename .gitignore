@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 node_modules/
 .next/
+/dashboard/test-results/
 *.db
 *.sqlite3
 *.pem

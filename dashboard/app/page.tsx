@@ -116,6 +116,8 @@ export default function Page() {
   const [attachTarget, setAttachTarget] = useState<{ jobId: string; finding: Finding & { source: string } } | null>(null);
   const [dialogIssue, setDialogIssue] = useState("");
   const [detail, setDetail] = useState<{ id: string; data: Assessment | null; error: string } | null>(null);
+  const sidebar = useRef<HTMLElement>(null);
+  const topbar = useRef<HTMLElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const listRequest = useRef<AbortController | null>(null);
   const live = token.length > 0;
@@ -133,6 +135,21 @@ export default function Page() {
   const selected = items.find(job => job.id === selectedId) ?? items[0];
   const selectedJobId = selected?.id;
   const hasResult = terminalStatuses.includes(selected?.status ?? "");
+
+  useEffect(() => {
+    const sidebarElement = sidebar.current;
+    const topbarElement = topbar.current;
+    if (!sidebarElement || !topbarElement) return;
+
+    const updateOffset = () => {
+      topbarElement.style.setProperty("--mobile-sidebar-height", `${sidebarElement.getBoundingClientRect().height}px`);
+    };
+
+    updateOffset();
+    const observer = new ResizeObserver(updateOffset);
+    observer.observe(sidebarElement, { box: "border-box" });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!token || currentView !== "scan-history" || !selectedJobId || !hasResult) return;
@@ -233,7 +250,7 @@ export default function Page() {
   const assessment = !live && selected && hasResult ? previewAssessment(selected) : live && hasResult && detail?.id === selectedJobId ? detail?.data ?? null : null;
 
   return <div className="shell">
-    <aside className="sidebar">
+    <aside className="sidebar" ref={sidebar}>
       <a className="brand" href="#dashboard"><span className="brand-mark"><ShieldCheck size={23} strokeWidth={2} /></span><span>PersistGuard</span></a>
       <div className="side-body"><p className="nav-label">OPERATIONS</p>
         <nav aria-label="Workspace">
@@ -248,7 +265,7 @@ export default function Page() {
       <div className="side-footer"><span className={`side-dot ${live ? "is-live" : ""}`} /><div><strong>{live ? "Live workspace" : "Preview workspace"}</strong><small>{live ? "PersistGuard API" : "Sample scan data"}</small></div></div>
     </aside>
     <div className="workspace">
-      <header className="topbar">
+      <header className="topbar" ref={topbar}>
         <div className="breadcrumb"><span>Operations</span><ChevronRight size={15} /><strong>{viewLabel}</strong></div>
         <button className="button connect" type="button" onClick={() => { setDialogIssue(""); dialog.current?.showModal(); }}>
           <Plug size={16} />{live ? "API connected" : "Connect API"}

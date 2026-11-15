@@ -327,6 +327,7 @@ the user's authorized organization. GUI presentation follows the GUI baseline.
 | Start scans            | ✓     | ✓       | —      |
 | Attach findings and update cases | ✓ | ✓ | — |
 | Enroll endpoints       | ✓     | —       | —      |
+| Revoke approved endpoints | ✓ | — | — |
 | View detection rules and version history | ✓ | ✓ | ✓ |
 | View deployment validation evidence | ✓ | ✓ | ✓ |
 | Record deployment validation evidence | ✓ | ✓ | — |
@@ -334,6 +335,12 @@ the user's authorized organization. GUI presentation follows the GUI baseline.
 | Manage users           | ✓     | —       | —      |
 
 Magkaroon din ng endpoint group permissions para halimbawa, ang analyst ng Finance department ay hindi automatic na makakapag-scan ng HR computers.
+
+Revocation applies to an approved endpoint in the administrator's organization.
+The API locks the endpoint row and commits the revoked status, credential
+revocations, cancellation of unfinished scans, and audit event in one transaction.
+Completed scan evidence remains available. The gateway denies the endpoint's
+certificates, and repeated requests return the existing revoked status.
 
 ### **Endpoint hardening**
 
@@ -563,6 +570,42 @@ Bago mo tawaging working MVP ang PersistGuard, dapat pumasa ito sa sumusunod:
 - Hindi makakakita ng ibang organization's data ang isang tenant.
 - Secure ang communication gamit ang TLS at authenticated agent credentials.
 - May automated tests para sa known benign at suspicious persistence examples.
+
+### Windows endpoint acceptance evidence
+
+| Check | Result on 2026-11-15 |
+| --- | --- |
+| Enrollment and identity | A Windows agent enrolled over TLS using a DPAPI-protected key. Admin approval, mTLS identity, and heartbeat succeeded against a local test stack. |
+| Scan and assessment | The job progressed from queued to dispatched to partial. The assessment included 8 Registry, 198 Scheduled Task, and 310 Windows Service artifacts. Windows denied `SERVICE_QUERY_CONFIG` for one visible service under the test account. The collector retained its name and state and reported partial coverage. A local rerun reproduced the denial at `OpenService`. |
+| Collector failure reporting | The PostgreSQL-backed gateway test stored a partial scan with a Scheduled Tasks collector error. |
+| Authorization and isolation | The Viewer was denied enrollment-token issuance and scan creation. An Admin from a second tenant could not approve the test endpoint or read its scan or assessment. |
+| Revocation | An Admin revoked the fixture through the dashboard. The open scan was canceled, the earlier assessment remained available, one audit event was recorded, and the gateway returned HTTP 403 for the revoked device. |
+
+These results document inventory collection and access control on one Windows
+host. The scan produced no scored detections. Technique-level detection
+validation requires evidence from a matching artifact.
+
+On 2026-11-16, the MAT Windows test VM ran `PersistGuardAgent` as
+`NT AUTHORITY\LocalService` and uploaded scan `ebb2958a-2125-4b51-953e-cad8d3c85a38`
+with status `completed`. All three collectors reported `collected`: 2 Registry
+entries, 183 Scheduled Tasks, and 271 visible Windows Services. The Services
+collector reported zero issues. Coverage reflects the services visible to
+that account on MAT.
+
+A manually triggered certificate renewal on MAT ran as `LocalService` while
+`PersistGuardAgent` was running. The gateway accepted the replacement and
+rejected the predecessor with HTTP 403. PostgreSQL recorded the renewal and
+confirmation audit events, and the service completed follow-up scan
+`124113a2-f224-4d51-b994-a6071b6b00bf`.
+
+The normal service polling loop also renewed a same-key test certificate
+already inside its renewal window, without advancing the guest clock or
+calling the manual renewal command. The agent activated the replacement,
+the gateway retired the test predecessor, and PostgreSQL recorded both
+audit events. The service completed follow-up scan
+`8049dd74-e65b-4b68-81d8-e40dde2892fb`, and the test script restored the original gateway. The
+fixture started inside the window, so this check covered the renewal path
+when due.
 
 ## **10. Recommended Starting Configuration**
 

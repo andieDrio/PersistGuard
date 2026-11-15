@@ -32,6 +32,8 @@ app = FastAPI(title="PersistGuard")
 app.include_router(device_enrollment_router)
 app.include_router(rotation_router)
 
+TERMINAL_SCAN_STATUSES = ("completed", "partial", "failed", "canceled")
+
 
 @app.get("/healthz", tags=["Health"])
 def health() -> dict[str, str]:
@@ -185,7 +187,7 @@ def approve_device_certificate(
                 raise HTTPException(status_code=409, detail="Endpoint has no current certificate")
             response.status_code = 200
             return DeviceCertificate(endpoint_id, credential.certificate_pem,
-                                     credential.certificate_serial, credential.expires_at)
+                                     credential.certificate_serial, credential.expires_at.astimezone(timezone.utc))
 
         if endpoint.status != "pending" or endpoint.device_public_key is None:
             raise HTTPException(status_code=409, detail="Endpoint is not awaiting certificate approval")
@@ -199,6 +201,42 @@ def approve_device_certificate(
         commit_audit_event(session, user, action, 201, target_id=endpoint_id)
     except (CertificateIssuanceError, SQLAlchemyError) as error:
         raise HTTPException(status_code=503, detail="Client certificate issuance unavailable") from error
+    return result
+
+
+@app.post("/api/endpoints/{endpoint_id}/revoke", tags=["Enrollment"])
+def revoke_endpoint(
+    endpoint_id: UUID,
+    user: Annotated[AuthenticatedUser, Depends(linked_account)],
+    session: Annotated[Session, Depends(database_session)],
+    response: Response,
+) -> dict[str, str]:
+    action = "endpoints.revoke"
+    require_admin(session, user, action)
+    response.headers["Cache-Control"] = "no-store"
+    result = {"endpoint_id": str(endpoint_id), "status": "revoked"}
+    try:
+        endpoint = session.scalar(select(Endpoint).where(
+            Endpoint.id == endpoint_id, Endpoint.organization_id == user.organization_id,
+        ).with_for_update())
+        if endpoint is None:
+            raise HTTPException(status_code=404, detail="Endpoint not found")
+        if endpoint.status == "revoked":
+            return result
+        if endpoint.status != "approved":
+            raise HTTPException(status_code=409, detail="Only approved endpoints can be revoked")
+
+        endpoint.status = "revoked"
+        session.execute(update(AgentCredential).where(
+            AgentCredential.endpoint_id == endpoint_id, AgentCredential.revoked_at.is_(None),
+        ).values(revoked_at=func.statement_timestamp()))
+        session.execute(update(ScanJob).where(
+            ScanJob.endpoint_id == endpoint_id, ScanJob.organization_id == user.organization_id,
+            ScanJob.status.not_in(TERMINAL_SCAN_STATUSES),
+        ).values(status="canceled", finished_at=func.statement_timestamp()))
+        commit_audit_event(session, user, action, 200, target_id=endpoint_id)
+    except SQLAlchemyError as error:
+        raise HTTPException(status_code=503, detail="Endpoint revocation unavailable") from error
     return result
 
 
@@ -258,7 +296,7 @@ def list_enrollment_endpoints(
     user: Annotated[AuthenticatedUser, Depends(local_identity)],
     session: Annotated[Session, Depends(database_session)],
     response: Response,
-    status: Literal["pending", "approved"] = "pending",
+    status: Literal["pending", "approved", "revoked"] = "pending",
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=2_147_483_647)] = 0,
 ) -> list[EndpointSummary]:
@@ -811,7 +849,7 @@ def queue_scan_job(
         job = session.scalar(select(ScanJob).where(
             ScanJob.endpoint_id == endpoint_id,
             ScanJob.organization_id == user.organization_id,
-            ScanJob.status.not_in(("completed", "partial", "failed", "canceled")),
+            ScanJob.status.not_in(TERMINAL_SCAN_STATUSES),
         ))
         if job is not None:
             response.status_code = 200

@@ -106,7 +106,10 @@ def rotate_certificate(
 
         if operation == "renew":
             replacement = renew_certificate(session, endpoint, current, now)
-            result = {"certificate_pem": replacement.certificate_pem, "expires_at": replacement.expires_at}
+            result = {
+                "certificate_pem": replacement.certificate_pem,
+                "expires_at": replacement.expires_at.astimezone(timezone.utc),
+            }
         else:
             if not current.replaces_serial or current.superseded_at is not None:
                 raise HTTPException(status_code=409, detail="Device must present its replacement certificate")
