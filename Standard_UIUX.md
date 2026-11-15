@@ -202,3 +202,15 @@ The PersistGuard GUI must render the same non-editable footer on every route, th
 - The footer stays at the bottom of the viewport when content is short, remains visible while scrolling, and adapts to narrow screens without obscuring content.
 - Only a reviewed source-code change may modify the locked wording or remove the footer; it is not configurable through dashboard settings.
 
+
+
+## Locked Sidebar and Top Navigation
+
+The dashboard's navigation chrome is a protected, consistent layout baseline:
+- The sidebar and top navigation bar remain visible while the main workspace scrolls.
+- On desktop, the sidebar stays anchored to the viewport edge and the top navigation stays at the top of the workspace.
+- On narrow screens, keep a compact pinned sidebar with horizontally scrollable navigation links, with the top navigation pinned immediately beneath it; avoid overlapping the workspace or hiding links.
+- Preserve keyboard access, readable focus states, and working navigation and API connection controls.
+- Navigation layout, branding, and placement are not editable through user-facing dashboard settings. Only an explicitly reviewed source change may alter the locked baseline.
+- The locked global footer remains present on all dashboard routes.
+
