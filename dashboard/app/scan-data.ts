@@ -89,3 +89,13 @@ export function previewAssessment(job: Job): Assessment {
     },
   };
 }
+export const scanTypes = {
+  persistence_full_scan: "Windows full inventory",
+  persistence_registry_scan: "Startup Registry",
+  persistence_scheduled_tasks_scan: "Scheduled Tasks",
+  persistence_services_scan: "Windows Services",
+} satisfies Record<string, string>;
+
+export function scanTypeLabel(scanType: string) {
+  return Object.hasOwn(scanTypes, scanType) ? scanTypes[scanType as keyof typeof scanTypes] : scanType;
+}

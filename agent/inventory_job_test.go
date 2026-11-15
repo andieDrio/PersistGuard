@@ -49,7 +49,10 @@ func TestInventoryJobRetriesTheSameReport(t *testing.T) {
 		}
 		return 200, []byte(`{"id":"` + id + `","status":"partial","finished_at":"2026-11-15T00:00:00Z"}`), nil
 	}
-	collect := func(_ context.Context, output io.Writer) error {
+	collect := func(_ context.Context, source string, output io.Writer) error {
+		if source != "" {
+			t.Fatalf("full scan selected collector %q", source)
+		}
 		collections++
 		_, err := io.WriteString(output, report)
 		return err

@@ -205,20 +205,28 @@ func TestGatewayChecksTLSAndRegisteredCredential(t *testing.T) {
 	if readLastSeen(otherEndpoint).Valid {
 		t.Fatal("heartbeat updated another endpoint")
 	}
-	queueJob := func(endpoint string) string {
+	queueJob := func(endpoint, scanType string) string {
 		t.Helper()
 		var id string
 		err := db.QueryRowContext(ctx, `INSERT INTO scan_jobs (id, organization_id, endpoint_id, requested_by, scan_type)
-			VALUES (gen_random_uuid(), $1, $2, gen_random_uuid(), 'persistence_full_scan') RETURNING id::text`,
-			expected.OrganizationID, endpoint).Scan(&id)
+			VALUES (gen_random_uuid(), $1, $2, gen_random_uuid(), $3) RETURNING id::text`,
+			expected.OrganizationID, endpoint, scanType).Scan(&id)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return id
 	}
+	targeted := false
 	poll := func(status int) dispatchedScanJob {
 		t.Helper()
-		response, err := device.Post(server.URL+"/api/agent/scan-jobs/poll?endpoint_id="+otherEndpoint, "", nil)
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/agent/scan-jobs/poll?endpoint_id="+otherEndpoint, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if targeted {
+			request.Header.Set("X-PersistGuard-Targeted-Scans", "1")
+		}
+		response, err := device.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,9 +242,9 @@ func TestGatewayChecksTLSAndRegisteredCredential(t *testing.T) {
 		}
 		return job
 	}
-	otherJob := queueJob(otherEndpoint)
+	otherJob := queueJob(otherEndpoint, "persistence_full_scan")
 	poll(http.StatusNoContent)
-	ownJob := queueJob(expected.EndpointID)
+	ownJob := queueJob(expected.EndpointID, "persistence_full_scan")
 	wantJob := dispatchedScanJob{ownJob, "persistence_full_scan", "dispatched"}
 	for range 2 {
 		if job := poll(http.StatusOK); job != wantJob {
@@ -278,6 +286,21 @@ func TestGatewayChecksTLSAndRegisteredCredential(t *testing.T) {
 	}
 	upload(ownJob, strings.Replace(report, "fixture unavailable", "different result", 1), http.StatusConflict)
 	poll(http.StatusNoContent)
+	targetJob := queueJob(expected.EndpointID, "persistence_services_scan")
+	poll(http.StatusNoContent)
+	targeted = true
+	if job := poll(http.StatusOK); job != (dispatchedScanJob{targetJob, "persistence_services_scan", "dispatched"}) {
+		t.Fatalf("unexpected targeted job: %+v", job)
+	}
+	upload(targetJob, report, http.StatusUnprocessableEntity)
+	const targetReport = `{"schema_version":1,"os_family":"windows","status":"collected","collectors":{
+		"services":{"status":"collected","report":{"os_family":"windows","entries":[],"coverage":{"status":"collected"}}}}}`
+	upload(ownJob, targetReport, http.StatusUnprocessableEntity)
+	upload(targetJob, strings.Replace(targetReport, `"services"`, `"registry"`, 1), http.StatusUnprocessableEntity)
+	if receipt := upload(targetJob, targetReport, http.StatusOK); !strings.Contains(receipt, `"status":"completed"`) ||
+		upload(targetJob, targetReport, http.StatusOK) != receipt {
+		t.Fatal("targeted scan did not complete with a stable receipt")
+	}
 	if _, err := db.ExecContext(ctx, "UPDATE agent_credentials SET revoked_at = now() WHERE certificate_serial = $1", serial.Text(16)); err != nil {
 		t.Fatal(err)
 	}

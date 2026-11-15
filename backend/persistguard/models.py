@@ -230,7 +230,8 @@ class ScanJob(Base):
     __table_args__ = (
         ForeignKeyConstraint(["endpoint_id", "organization_id"], ["endpoints.id", "endpoints.organization_id"]),
         UniqueConstraint("id", "organization_id", name="uq_scan_jobs_id_org"),
-        CheckConstraint("scan_type = 'persistence_full_scan'", name="ck_scan_jobs_type"),
+        CheckConstraint("scan_type IN ('persistence_full_scan', 'persistence_registry_scan', "
+                        "'persistence_scheduled_tasks_scan', 'persistence_services_scan')", name="ck_scan_jobs_type"),
         CheckConstraint(
             "status IN ('queued', 'dispatched', 'acknowledged', 'running', 'uploading', 'analyzing', "
             "'completed', 'partial', 'failed', 'canceled')", name="ck_scan_jobs_status",

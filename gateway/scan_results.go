@@ -13,7 +13,7 @@ import (
 
 var scanJobID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-func scanResultStatus(payload []byte) string {
+func scanResultStatus(payload []byte) (status, scanType string) {
 	var report struct {
 		Version    int    `json:"schema_version"`
 		OSFamily   string `json:"os_family"`
@@ -24,12 +24,27 @@ func scanResultStatus(payload []byte) string {
 			Error  string          `json:"error"`
 		} `json:"collectors"`
 	}
-	if err := json.Unmarshal(payload, &report); err != nil || report.Version != 1 || report.OSFamily != "windows" || len(report.Collectors) != 3 {
-		return ""
+	if err := json.Unmarshal(payload, &report); err != nil || report.Version != 1 || report.OSFamily != "windows" {
+		return "", ""
 	}
+	sources := map[string]string{
+		"registry": "persistence_registry_scan", "scheduled_tasks": "persistence_scheduled_tasks_scan",
+		"services": "persistence_services_scan",
+	}
+	count := len(report.Collectors)
+	if count != 1 && count != len(sources) {
+		return "", ""
+	}
+	scanType = "persistence_full_scan"
 	readable, complete := 0, 0
-	for _, source := range []string{"registry", "scheduled_tasks", "services"} {
-		collector := report.Collectors[source]
+	for source, collector := range report.Collectors {
+		targetType, known := sources[source]
+		if !known {
+			return "", ""
+		}
+		if count == 1 {
+			scanType = targetType
+		}
 		switch collector.Status {
 		case "collected":
 			readable++
@@ -41,7 +56,7 @@ func scanResultStatus(payload []byte) string {
 				continue
 			}
 		default:
-			return ""
+			return "", ""
 		}
 		var nested struct {
 			OSFamily string          `json:"os_family"`
@@ -51,18 +66,18 @@ func scanResultStatus(payload []byte) string {
 		if err := json.Unmarshal(collector.Report, &nested); err != nil || nested.OSFamily != "windows" ||
 			len(nested.Entries) == 0 || nested.Entries[0] != '[' || len(nested.Coverage) == 0 ||
 			(nested.Coverage[0] != '[' && nested.Coverage[0] != '{') {
-			return ""
+			return "", ""
 		}
 	}
 	switch {
-	case complete == 3 && report.Status == "collected":
-		return "completed"
+	case complete == count && report.Status == "collected":
+		return "completed", scanType
 	case readable == 0 && report.Status == "error":
-		return "failed"
-	case readable > 0 && complete < 3 && report.Status == "partial":
-		return "partial"
+		return "failed", scanType
+	case readable > 0 && complete < count && report.Status == "partial":
+		return "partial", scanType
 	default:
-		return ""
+		return "", ""
 	}
 }
 
@@ -83,7 +98,7 @@ func storeScanResult(db *sql.DB, w http.ResponseWriter, r *http.Request, device 
 		}
 		return
 	}
-	status := scanResultStatus(payload)
+	status, scanType := scanResultStatus(payload)
 	if status == "" {
 		http.Error(w, "invalid Windows inventory report", http.StatusUnprocessableEntity)
 		return
@@ -94,21 +109,23 @@ func storeScanResult(db *sql.DB, w http.ResponseWriter, r *http.Request, device 
 		SELECT endpoint.id, endpoint.organization_id` + activeDeviceCredential + `
 		AND credential.certificate_pem = $2 AND endpoint.id = $3 AND endpoint.organization_id = $4
 	), target AS (
-		SELECT job.id FROM scan_jobs AS job JOIN authorized
+		SELECT job.id, job.scan_type FROM scan_jobs AS job JOIN authorized
 		ON job.endpoint_id = authorized.id AND job.organization_id = authorized.organization_id
-		WHERE job.id = $5 AND job.scan_type = 'persistence_full_scan'
+		WHERE job.id = $5
 	), saved AS (
 		UPDATE scan_jobs AS job SET result = $6::jsonb, status = $7,
 			finished_at = COALESCE(job.finished_at, statement_timestamp())
-		FROM target WHERE job.id = target.id
+		FROM target WHERE job.id = target.id AND target.scan_type = $8
 		AND (job.status = 'dispatched' OR (job.status = $7 AND job.result = $6::jsonb))
 		RETURNING job.finished_at
 	)
-	SELECT EXISTS (SELECT 1 FROM authorized), EXISTS (SELECT 1 FROM target), (SELECT finished_at FROM saved)`
-	var authorized, found bool
+	SELECT EXISTS (SELECT 1 FROM authorized), EXISTS (SELECT 1 FROM target),
+		EXISTS (SELECT 1 FROM target WHERE scan_type = $8), (SELECT finished_at FROM saved)`
+	var authorized, found, matchingScope bool
 	var finished sql.NullTime
 	if err := db.QueryRowContext(ctx, save, device.serial, device.certificatePEM,
-		device.identity.EndpointID, device.identity.OrganizationID, jobID, string(payload), status).Scan(&authorized, &found, &finished); err != nil {
+		device.identity.EndpointID, device.identity.OrganizationID, jobID, string(payload), status, scanType).
+		Scan(&authorized, &found, &matchingScope, &finished); err != nil {
 		http.Error(w, "scan result storage unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -117,6 +134,8 @@ func storeScanResult(db *sql.DB, w http.ResponseWriter, r *http.Request, device 
 		http.Error(w, "device credential unavailable", http.StatusForbidden)
 	case !found:
 		http.Error(w, "scan job not found", http.StatusNotFound)
+	case !matchingScope:
+		http.Error(w, "inventory report does not match scan scope", http.StatusUnprocessableEntity)
 	case !finished.Valid:
 		http.Error(w, "job is not dispatched or already has a different result", http.StatusConflict)
 	default:

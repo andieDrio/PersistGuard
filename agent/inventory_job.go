@@ -20,17 +20,26 @@ type inventoryJob struct {
 	Status   string `json:"status"`
 }
 
+var inventorySources = map[string]string{
+	"persistence_full_scan":            "",
+	"persistence_registry_scan":        "registry",
+	"persistence_scheduled_tasks_scan": "scheduled_tasks",
+	"persistence_services_scan":        "services",
+}
+
 func readInventoryJob(body []byte) (inventoryJob, error) {
 	var job inventoryJob
-	if err := json.Unmarshal(body, &job); err != nil || !uuidText.MatchString(job.ID) ||
-		job.ScanType != "persistence_full_scan" || job.Status != "dispatched" {
+	if err := json.Unmarshal(body, &job); err != nil || !uuidText.MatchString(job.ID) || job.Status != "dispatched" {
+		return inventoryJob{}, errors.New("gateway returned an invalid inventory job")
+	}
+	if _, supported := inventorySources[job.ScanType]; !supported {
 		return inventoryJob{}, errors.New("gateway returned an invalid inventory job")
 	}
 	return job, nil
 }
 
 func executeInventoryJob(ctx context.Context, send func(string, string, []byte) (int, []byte, error),
-	collect func(context.Context, io.Writer) error, output io.Writer) error {
+	collect func(context.Context, string, io.Writer) error, output io.Writer) error {
 	status, body, err := send(http.MethodPost, "scan-jobs/poll", nil)
 	if err != nil {
 		return err
@@ -46,7 +55,7 @@ func executeInventoryJob(ctx context.Context, send func(string, string, []byte) 
 		return err
 	}
 	var report bytes.Buffer
-	if err := collect(ctx, &report); err != nil {
+	if err := collect(ctx, inventorySources[job.ScanType], &report); err != nil {
 		return err
 	}
 	path := "scan-jobs/" + job.ID + "/result"

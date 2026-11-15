@@ -10,7 +10,7 @@ import { readAPI } from "./api";
 import { AttachFindingDialog } from "./case-findings";
 import { EndpointOnboarding } from "./endpoint-onboarding";
 import { ScanControlDialog, type ScanAction, type ScanTarget, type ScanTargets } from "./scan-controls";
-import { activeStatuses, previewAssessment, previewJobs, sourceNames, terminalStatuses, type Assessment, type Finding, type Job } from "./scan-data";
+import { activeStatuses, previewAssessment, previewJobs, scanTypeLabel, sourceNames, terminalStatuses, type Assessment, type Finding, type Job } from "./scan-data";
 import { sections, WorkspaceSection } from "./workspace";
 
 const pageSize = 7;
@@ -53,7 +53,7 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach }: {
       <dl className="detail-meta">
         <div><dt>Status</dt><dd><Badge status={job.status} /></dd></div>
         <div><dt>Endpoint</dt><dd className="mono endpoint-detail" title={job.endpoint_id}>{job.endpointLabel ?? shortId(job.endpoint_id)}</dd></div>
-        <div><dt>Type</dt><dd>Windows full inventory</dd></div>
+        <div><dt>Type</dt><dd>{scanTypeLabel(job.scan_type)}</dd></div>
         <div><dt>Baseline</dt><dd className={assessment?.baseline_job_id ? "mono" : ""}>{assessment?.baseline_job_id ? `#${shortId(assessment.baseline_job_id)}` : "—"}</dd></div>
       </dl>
       {cancel && <div className="detail-actions"><button className="button cancel-button" type="button" onClick={cancel}>Cancel scan</button></div>}
@@ -128,7 +128,7 @@ export default function Page() {
   const jobs = live ? liveJobs.map(job => ({ ...job, endpointLabel: hostnames.get(job.endpoint_id) })) : previewJobs;
   const query = search.trim().toLowerCase();
   const filtered = jobs.filter(job => (status === "all" || (status === "active" ? activeStatuses.includes(job.status) : status === job.status)) &&
-    (!query || [job.id, job.endpoint_id, job.endpointLabel ?? "", "Windows full inventory", label(job.status)].some(value => value.toLowerCase().includes(query))));
+    (!query || [job.id, job.endpoint_id, job.endpointLabel ?? "", scanTypeLabel(job.scan_type), label(job.status)].some(value => value.toLowerCase().includes(query))));
   const lastPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1);
   const currentPage = Math.min(page, lastPage);
   const items = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
@@ -294,7 +294,7 @@ export default function Page() {
               </select><ChevronDown size={14} /></label></div>
             <div className="table-scroll"><table><thead><tr><th>Scan</th><th>Endpoint</th><th>Status</th><th>Created <ArrowDown size={12} /></th><th aria-label="Open details" /></tr></thead>
               <tbody>{items.map(job => <tr key={job.id} className={selected?.id === job.id ? "selected" : ""}>
-                <td><button className="scan-button" type="button" aria-pressed={selected?.id === job.id} onClick={() => setSelectedId(job.id)}><strong>Windows full inventory</strong><small className="mono">#{shortId(job.id)}</small></button></td>
+                <td><button className="scan-button" type="button" aria-pressed={selected?.id === job.id} onClick={() => setSelectedId(job.id)}><strong>{scanTypeLabel(job.scan_type)}</strong><small className="mono">#{shortId(job.id)}</small></button></td>
                 <td><span className="endpoint" title={job.endpoint_id}><Monitor size={15} /><span className="mono">{job.endpointLabel ?? shortId(job.endpoint_id)}</span></span></td>
                 <td><Badge status={job.status} /></td>
                 <td><div className="scan-date">{dateFormat.format(new Date(job.created_at))}<small>{timeFormat.format(new Date(job.created_at))}</small></div></td>

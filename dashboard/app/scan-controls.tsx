@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { readAPI } from "./api";
-import type { Job } from "./scan-data";
+import { scanTypes, type Job } from "./scan-data";
 
 export type ScanTarget = { id: string; hostname: string };
 export type ScanTargets = { can_manage: boolean; can_onboard: boolean; endpoints: ScanTarget[] };
@@ -16,6 +16,7 @@ export function ScanControlDialog({ action, token, close, onSaved }: {
   const actionRequest = useRef<AbortController | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
+  const [scanType, setScanType] = useState("persistence_full_scan");
   const [targets, setTargets] = useState<{ query: string; entries: ScanTarget[]; error: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState("");
@@ -48,7 +49,7 @@ export function ScanControlDialog({ action, token, close, onSaved }: {
     const path = action.kind === "queue" ? `endpoints/${encodeURIComponent(selected)}/scan-jobs` :
       `scan-jobs/${encodeURIComponent(action.job.id)}/cancel`;
     try {
-      const job = await readAPI<Job>(path, token, request.signal, "POST");
+      const job = await readAPI<Job>(path, token, request.signal, "POST", queue ? { scan_type: scanType } : undefined);
       if (!request.signal.aborted) onSaved(job, action);
     } catch (error) {
       if (!request.signal.aborted) setIssue(error instanceof Error ? error.message : "The scan could not be updated.");
@@ -72,6 +73,11 @@ export function ScanControlDialog({ action, token, close, onSaved }: {
           <option value="">{!results ? "Loading endpoints…" : results.entries.length ? "Select an endpoint" : "No matching endpoints"}</option>
           {results?.entries.map(endpoint => <option value={endpoint.id} key={endpoint.id}>{endpoint.hostname} ({endpoint.id.slice(0, 8)})</option>)}
         </select>
+        <label htmlFor="scan-scope">Scan scope</label>
+        <select id="scan-scope" value={scanType} disabled={busy} onChange={event => setScanType(event.target.value)}>
+          {Object.entries(scanTypes).map(([type, label]) => <option value={type} key={type}>{label}</option>)}
+        </select>
+        {scanType !== "persistence_full_scan" && <p className="muted">Targeted scans require an agent with targeted scan support.</p>}
         {results?.error && <p role="alert" className="api-error">{results.error}</p>}
       </>}
       {issue && <p role="alert" className="api-error">{issue}</p>}

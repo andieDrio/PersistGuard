@@ -18,6 +18,17 @@ const versions = [2, 1].map(version => ({
   score: version === 2 ? 50 : 40, published_at: "2026-01-01T00:00:00Z",
 }));
 const restoredRules = new Map();
+const queuedScans = new Map();
+
+async function readJSON(request) {
+  try {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return null;
+  }
+}
 
 createServer(async (request, response) => {
   const { pathname, searchParams } = new URL(request.url, "http://127.0.0.1");
@@ -37,8 +48,9 @@ createServer(async (request, response) => {
 
   if (request.method === "GET") {
     switch (pathname) {
-      case "/api/scan-jobs": return send(200, []);
-      case "/api/scan-targets": return send(200, { can_manage: role !== "viewer", can_onboard: isAdmin, endpoints: [] });
+      case "/api/scan-jobs": return send(200, queuedScans.get(authorization) ?? []);
+      case "/api/scan-targets": return send(200, { can_manage: role !== "viewer", can_onboard: isAdmin,
+        endpoints: [{ id: endpoint.id, hostname: endpoint.hostname }] });
       case "/api/workspace": return send(200, {
         tenant: { name: "Regression tenant", count: 1 },
         can_manage: role !== "viewer",
@@ -58,16 +70,19 @@ createServer(async (request, response) => {
     revoked.add(authorization);
     return send(200, { endpoint_id: endpoint.id, status: "revoked" });
   }
+  if (request.method === "POST" && pathname === `/api/endpoints/${endpoint.id}/scan-jobs`) {
+    if (role === "viewer") return send(403, { detail: "Scan scheduling requires an admin or analyst" });
+    const body = await readJSON(request);
+    if (body?.scan_type !== "persistence_services_scan") return send(422, { detail: "Invalid fixture scan scope" });
+    const job = { id: "cd3c2b28-a25c-409f-a694-fc26e79331ac", endpoint_id: endpoint.id,
+      scan_type: body.scan_type, status: "queued", created_at: endpoint.created_at };
+    queuedScans.set(authorization, [job]);
+    return send(201, job);
+  }
   if (request.method === "POST" && pathname === `/api/detection-rules/${rule.id}/rollback`) {
     if (!isAdmin) return send(403, { detail: "Administrator access required" });
-    let body;
-    try {
-      const chunks = [];
-      for await (const chunk of request) chunks.push(chunk);
-      body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    } catch {
-      return send(422, { detail: "Invalid rollback request" });
-    }
+    const body = await readJSON(request);
+    if (!body) return send(422, { detail: "Invalid rollback request" });
     if (body?.revision !== currentRule.revision) return send(409, { detail: "Rule revision has changed" });
     if (!versions.some(version => version.version === body.version)) return send(404, { detail: "Version not found" });
     if (body.version === currentRule.published_version) return send(409, { detail: "Version is already active" });

@@ -107,10 +107,23 @@ func collectWindowsInventory(ctx context.Context, collectors []inventoryCollecto
 }
 
 func writeWindowsInventory(ctx context.Context, output io.Writer) error {
+	return writeWindowsScan(ctx, "", output)
+}
+
+func writeWindowsScan(ctx context.Context, source string, output io.Writer) error {
 	if runtime.GOOS != "windows" {
 		return errors.New("combined Windows inventory requires Windows")
 	}
-	return collectWindowsInventory(ctx, []inventoryCollector{
+	collectors := []inventoryCollector{
 		{"registry", writeStartupInventory}, {"scheduled_tasks", writeScheduledTasksInventory}, {"services", writeServicesInventory},
-	}, output)
+	}
+	if source != "" {
+		for _, collector := range collectors {
+			if collector.source == source {
+				return collectWindowsInventory(ctx, []inventoryCollector{collector}, output)
+			}
+		}
+		return errors.New("unknown Windows inventory collector")
+	}
+	return collectWindowsInventory(ctx, collectors, output)
 }
