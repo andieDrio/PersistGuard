@@ -286,122 +286,14 @@ body > .shell { flex: 1 0 auto; }
   .persistguard-footer { justify-content: center; text-align: center; padding: 10px 14px; }
 }
 
-
-/* Locked navigation chrome: keep sidebar and top navigation visible during scroll. */
-.sidebar { z-index: 40; }
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  min-width: 0;
-  box-shadow: 0 1px 4px rgb(20 42 35 / 5%);
-}
-.workspace { min-width: 0; }
-@media (max-width: 680px) {
-  /* Compact fixed-height sidebar keeps the sticky topbar from overlapping it. */
-  .sidebar {
-    position: sticky;
-    top: 0;
-    z-index: 40;
-    height: 104px;
-    min-height: 104px;
-    padding: 9px 14px 7px;
-    overflow: hidden;
-    gap: 7px;
-  }
-  .sidebar .side-body {
-    margin: 0;
-    min-height: 0;
-    overflow: hidden;
-  }
-  .sidebar nav {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
-    padding-bottom: 3px;
-  }
-  .sidebar nav a { white-space: nowrap; flex: 0 0 auto; }
-  .sidebar .side-footer { display: none; }
-  .topbar { position: sticky; top: 104px; z-index: 30; }
-}
-
-
-/* App viewport lock: ONLY the workspace content is vertically scrollable. */
-html, body { height: 100%; overflow: hidden; }
-body {
-  height: 100dvh;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  overflow: hidden;
-}
-body > .shell {
-  display: grid;
-  grid-template-columns: 218px minmax(0, 1fr);
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-.sidebar {
-  position: relative;
-  top: auto;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-.sidebar .side-body { overflow: hidden; }
-.workspace {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-.workspace > .topbar {
-  position: relative;
-  top: auto;
-  flex-shrink: 0;
-  z-index: 2;
-}
-.workspace > :not(.topbar) {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.persistguard-footer {
-  position: relative;
-  bottom: auto;
-  z-index: 3;
-  flex-shrink: 0;
-}
-@media (max-width: 1120px) {
-  body > .shell { grid-template-columns: 181px minmax(0, 1fr); }
+/* Navigation-only lock: preserve the original dashboard layout and content flow. */
+@media (min-width: 681px) {
+  .sidebar { position: sticky; top: 0; height: 100dvh; overflow: hidden; }
+  .sidebar .side-body { overflow-y: hidden; }
+  .topbar { position: sticky; top: 0; z-index: 30; }
 }
 @media (max-width: 680px) {
-  body > .shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .sidebar {
-    position: relative;
-    top: auto;
-    height: auto;
-    min-height: 0;
-    padding: 9px 14px;
-    overflow: hidden;
-  }
-  .sidebar .side-body { overflow: visible; }
-  .sidebar nav {
-    display: flex;
-    flex-wrap: wrap;
-    overflow: visible;
-    gap: 3px;
-    padding: 0;
-  }
-  .sidebar nav a { white-space: normal; }
-  .workspace { min-height: 0; height: 100%; }
-  .workspace > .topbar { position: relative; top: auto; }
+  /* Preserve the original responsive navigation and content sizing. */
+  .sidebar { position: sticky; top: 0; z-index: 40; }
+  .topbar { position: sticky; top: 0; z-index: 30; }
 }
