@@ -206,14 +206,12 @@ The PersistGuard GUI must render the same non-editable footer on every route, th
 
 ## Locked Sidebar and Top Navigation
 
-PersistGuard uses a **viewport-locked application shell**, not document-level scrolling or sticky navigation.
+Preserve the original dashboard layout, page content sizing, spacing, and scroll behavior. Navigation locking must not replace the page with a viewport-sized grid, center previously top-aligned content, or clip existing views.
 
-- The browser document and app shell must not scroll vertically.
-- The sidebar is permanently stationary, has no vertical or horizontal scrollbar, and never moves with the workspace.
-- The top navigation bar is stationary in its own layout row.
-- The global footer is stationary in the bottom layout row.
-- **Only the main workspace content container scrolls vertically**; preserve keyboard and touch scrolling within that container.
-- On narrow screens, stack the stationary sidebar/navigation above the workspace without introducing document-level scrolling. Navigation must remain accessible and must not overlap content.
-- Navigation branding, position, and footer wording are locked design baselines, not configurable from GUI settings.
-- Verify the layout on desktop and mobile with long content, short content, and dialogs; no navigation or footer should move during workspace scrolling.
+- Desktop sidebar remains anchored using sticky positioning and does not independently scroll.
+- Top navigation remains visible using sticky positioning.
+- Footer wording and year behavior remain unchanged.
+- Responsive navigation keeps its original sizing and wrapping; avoid clipping links.
+- Navigation branding and placement are not editable through user-facing GUI settings.
+- Validate desktop and mobile screenshots and long-content scrolling before declaring the layout verified.
 
