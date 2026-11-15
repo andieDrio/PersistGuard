@@ -206,11 +206,14 @@ The PersistGuard GUI must render the same non-editable footer on every route, th
 
 ## Locked Sidebar and Top Navigation
 
-The dashboard's navigation chrome is a protected, consistent layout baseline:
-- The sidebar and top navigation bar remain visible while the main workspace scrolls.
-- On desktop, the sidebar stays anchored to the viewport edge and the top navigation stays at the top of the workspace.
-- On narrow screens, keep a compact pinned sidebar with horizontally scrollable navigation links, with the top navigation pinned immediately beneath it; avoid overlapping the workspace or hiding links.
-- Preserve keyboard access, readable focus states, and working navigation and API connection controls.
-- Navigation layout, branding, and placement are not editable through user-facing dashboard settings. Only an explicitly reviewed source change may alter the locked baseline.
-- The locked global footer remains present on all dashboard routes.
+PersistGuard uses a **viewport-locked application shell**, not document-level scrolling or sticky navigation.
+
+- The browser document and app shell must not scroll vertically.
+- The sidebar is permanently stationary, has no vertical or horizontal scrollbar, and never moves with the workspace.
+- The top navigation bar is stationary in its own layout row.
+- The global footer is stationary in the bottom layout row.
+- **Only the main workspace content container scrolls vertically**; preserve keyboard and touch scrolling within that container.
+- On narrow screens, stack the stationary sidebar/navigation above the workspace without introducing document-level scrolling. Navigation must remain accessible and must not overlap content.
+- Navigation branding, position, and footer wording are locked design baselines, not configurable from GUI settings.
+- Verify the layout on desktop and mobile with long content, short content, and dialogs; no navigation or footer should move during workspace scrolling.
 
