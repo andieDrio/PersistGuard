@@ -166,7 +166,30 @@ class DetectionRulesTests(unittest.TestCase):
                     versions = client.get(f"{url}/versions").json()
                     self.assertEqual([(item["version"], item["score"]) for item in versions], [(2, 50), (1, 40)])
                     self.assertEqual(client.get(f"{url}/versions", params={"before": 2}).json(), versions[1:])
-                    disabled = client.put(f"{url}/activation", json={"revision": published.json()["revision"], "enabled": False})
+                    actor = admins[1]
+                    self.assertEqual(client.post(f"{url}/rollback", json={
+                        "revision": published.json()["revision"], "version": 1}).status_code, 404)
+                    actor = AuthenticatedUser("analyst", admins[0].user_id, admins[0].organization_id, "analyst", True)
+                    self.assertEqual(client.post(f"{url}/rollback", json={
+                        "revision": published.json()["revision"], "version": 1}).status_code, 403)
+                    actor = admins[0]
+                    self.assertEqual(client.post(f"{url}/rollback", json={
+                        "revision": published.json()["revision"], "version": 999}).status_code, 404)
+                    rollback = client.post(f"{url}/rollback", json={
+                        "revision": published.json()["revision"], "version": 1})
+                    self.assertEqual(rollback.status_code, 200, rollback.text)
+                    self.assertEqual((rollback.json()["published_version"], rollback.json()["draft_version"]), (1, 2))
+                    self.assertEqual(findings(job_ids[0])[0]["score"], 40)
+                    self.assertEqual(client.post(f"{url}/rollback", json={
+                        "revision": published.json()["revision"], "version": 2}).status_code, 409)
+                    self.assertEqual(client.post(f"{url}/rollback", json={
+                        "revision": rollback.json()["revision"], "version": 1}).status_code, 409)
+                    self.assertEqual(len(client.get(f"{url}/versions").json()), 2)
+                    with Session(connection, join_transaction_mode="create_savepoint") as session:
+                        self.assertIsNotNone(session.scalar(select(AuditEvent.id).where(
+                            AuditEvent.actor_id == actor.user_id, AuditEvent.target_id == UUID(rule["id"]),
+                            AuditEvent.action == "detection_rules.rollback", AuditEvent.status_code == 200)))
+                    disabled = client.put(f"{url}/activation", json={"revision": rollback.json()["revision"], "enabled": False})
                     self.assertEqual(disabled.status_code, 200, disabled.text)
                     self.assertEqual([item["score"] for item in findings(job_ids[0])], [0, 0])
 
