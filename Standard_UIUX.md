@@ -190,3 +190,15 @@ For every GUI change, confirm:
 | 1.0 | 2026-11-15 | Initial XDR UI/UX standard and mandatory development loop | Pending review |
 | 1.1 | 2026-11-15 | Restrict initial application roles to Admin, Analyst, Viewer; define RBAC matrix and enforcement rules | User-directed |
 | 1.2 | 2026-11-15 | Link the GUI baseline to the shared project loop and architecture-owned permissions | User-directed |
+
+
+## Locked Global Footer
+
+The PersistGuard GUI must render the same non-editable footer on every route, through the shared application layout rather than per-page copies.
+
+- Exact first line: `Cybersecurity is everyone Responsibility`
+- Exact second-line prefix: `Powered by: apm @ ` followed by the current calendar year.
+- The year must refresh automatically while the browser remains open across a year boundary.
+- The footer stays at the bottom of the viewport when content is short, remains visible while scrolling, and adapts to narrow screens without obscuring content.
+- Only a reviewed source-code change may modify the locked wording or remove the footer; it is not configurable through dashboard settings.
+
