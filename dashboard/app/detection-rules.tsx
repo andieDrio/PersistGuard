@@ -113,8 +113,8 @@ function RuleState({ rule }: { rule: Rule }) {
     {rule.enabled ? `Active v${rule.published_version}` : rule.published_version !== null ? "Disabled" : rule.tested ? "Tested draft" : "Draft"}</span>;
 }
 
-function RuleHistory({ rule, token, exportVersion, exporting }: {
-  rule: Rule; token: string; exportVersion?: (version: number) => void; exporting: boolean;
+function RuleHistory({ rule, token, exportVersion, rollbackVersion, exporting }: {
+  rule: Rule; token: string; exportVersion?: (version: number) => void; rollbackVersion?: (version: number) => void; exporting: boolean;
 }) {
   const [versions, setVersions] = useState<PublishedRule[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
@@ -139,13 +139,13 @@ function RuleHistory({ rule, token, exportVersion, exporting }: {
     {error && <p role="alert">{error}</p>}
     {!versions.length && !loading && !error && <p>No versions published yet.</p>}
     {!!versions.length && <div className="table-scroll"><table><thead><tr><th>Version</th><th>Definition</th><th>Points</th><th>Published</th>
-      {exportVersion && <th>Export</th>}</tr></thead>
+      {exportVersion && <th>Export</th>}{rollbackVersion && <th>Restore</th>}</tr></thead>
       <tbody>{versions.map(version => <tr key={version.version}>
         <td>v{version.version}{version.version === rule.published_version && rule.enabled ? " · Active" : ""}</td>
         <td className="rule-condition"><strong>{version.name}</strong><br />{sources[version.source]} · {fields[version.field]} contains <code>{version.pattern}</code></td>
         <td>{version.score}</td><td>{version.published_at ? publishedDate.format(new Date(version.published_at)) : "Date unavailable"}</td>
         {exportVersion && <td><button className="button" type="button" disabled={exporting}
-          onClick={() => exportVersion(version.version)}><Download size={15} />Export v{version.version}</button></td>}
+          onClick={() => exportVersion(version.version)}><Download size={15} />Export v{version.version}</button></td>}{rollbackVersion && <td><button className="button" type="button" disabled={exporting || (rule.enabled && rule.published_version === version.version)} onClick={() => rollbackVersion(version.version)}>Restore v{version.version}</button></td>}
       </tr>)}</tbody></table></div>}
     {hasMore && <button className="button" type="button" disabled={loading} onClick={() => {
       setError(""); setLoading(true); setCursor(versions[versions.length - 1].version);
@@ -261,6 +261,17 @@ export function DetectionRules({ token }: { token: string }) {
     });
   }
 
+  async function rollbackVersion(rule: Rule, version: number) {
+    if (!window.confirm(`Restore published v${version} for "${rule.name}"? This immediately changes live scoring. The draft and history will be preserved.`)) return;
+    await perform(async () => {
+      const updated = await readAPI<Rule>(`detection-rules/${rule.id}/rollback`, token, AbortSignal.timeout(10000),
+        "POST", { revision: rule.revision, version });
+      updateRule(updated);
+      setRefresh(value => value + 1);
+      setNotice(`Published v${version} restored and active. Existing history preserved.`);
+    });
+  }
+
   if (!token) return <p className="panel section-note rules-panel">Connect the API to view your tenant’s custom rules.</p>;
   const dirty = Boolean(selected && (Object.keys(draft) as (keyof Definition)[]).some(field => draft[field] !== selected[field]));
   const locked = busy || loading;
@@ -290,7 +301,7 @@ export function DetectionRules({ token }: { token: string }) {
         {data.can_manage && <button type="button" className="button" disabled={locked} aria-label={`Edit ${rule.name}`} onClick={() => open(rule)}>Edit</button>}</div></td>
     </tr>)}</tbody></table></div>}
     {historyRule && <RuleHistory key={`${historyRule.id}-${historyRule.published_version}-${refresh}`} rule={historyRule} token={token}
-      exporting={locked || exporting} exportVersion={data?.can_manage ? version => void downloadYAML(historyRule, version) : undefined} />}
+      exporting={locked || exporting} exportVersion={data?.can_manage ? version => void downloadYAML(historyRule, version) : undefined} rollbackVersion={data?.can_manage ? version => void rollbackVersion(historyRule, version) : undefined} />}
     {importing && <RuleYAMLImport token={token} close={() => setImporting(false)} saved={rule => {
       setImporting(false); open(rule); updateRule(rule); setNotice("YAML imported as a draft. Test a matching sample before publishing.");
     }} />}
