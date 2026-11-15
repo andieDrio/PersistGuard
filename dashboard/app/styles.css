@@ -259,3 +259,29 @@ dialog select { border: 1px solid #cedbd2; background: white; border-radius: 6px
   .rule-form { grid-template-columns: 1fr; }
 }
 @media (max-width: 365px) { .refresh { padding: 6px; } .sidebar nav a { padding: 0 4px; } }
+
+
+/* Global locked footer: visible at the bottom of the viewport, on every route. */
+body { min-height: 100dvh; display: flex; flex-direction: column; }
+body > .shell { flex: 1 0 auto; }
+.persistguard-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 11px 24px;
+  background: #142a23;
+  color: #e6f0e9;
+  border-top: 1px solid #345044;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+@media (max-width: 680px) {
+  .persistguard-footer { justify-content: center; text-align: center; padding: 10px 14px; }
+}
