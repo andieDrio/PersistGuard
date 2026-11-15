@@ -4,6 +4,29 @@ Technical Architecture v1.0 | Multi-Endpoint Malware Persistence Detection Platf
 
 > **Project scope:** PersistGuard is a new, standalone project developed from scratch. This architecture does not depend on or migrate code, folders, configuration, or history from any previous local project. The canonical repository is `andieDrio/PersistGuard`, using the existing `main` branch only.
 
+## Loop Instruction for Project Updates
+
+This file owns system design, data flows, authorization, and implementation order.
+Use the complementary baselines when planning and verifying changes.
+
+- Capability requirements and validation criteria. [XDRCapabilities.md](XDRCapabilities.md)
+- GUI interaction, accessibility, layout, and verification standards. [Standard_UIUX.md](Standard_UIUX.md)
+
+1. Start with this architecture. Identify the affected component, data flow,
+   tenant boundary, allowed roles, and implementation milestone.
+2. Consult the capability baseline for the relevant use case. Confirm the telemetry,
+   detection rule, and evidence needed to validate it. Read the GUI baseline before
+   each GUI update and identify the applicable standards.
+3. Implement through the existing architecture. If the update needs an architectural
+   change, document the decision here before implementing it.
+4. Test through the normal entry point. Verify positive and negative cases, and
+   check role and tenant boundaries for tenant-scoped features.
+5. Update this architecture when an implementation decision changes. Update the
+   baseline when capability requirements change and the GUI guide when GUI standards
+   change. Record verified detection
+   evidence in the coverage matrix and use the remaining gaps to choose the next priority.
+   Return to step 1 for the next update.
+
 Para sa centralized version ng PersistGuard, irerekomenda ko ang **agent-based, zero-trust architecture**. Mag-i-install ka ng lightweight agent sa bawat Windows, macOS, at Linux endpoint, habang ang isang central web dashboard ang magko-control ng scanning, searching, detection, investigation, at reporting.
 
 Ang pinakaimportanteng design decision: **ang endpoint agent ang nagbabasa ng OS artifacts, hindi ang browser o central backend nang direkta.** Ito ang mas secure, mas reliable, at mas madaling i-scale.
@@ -165,9 +188,23 @@ Maglagay ng maximum job runtime, output size limits, retry with backoff, at idem
 | `findings`             | id, artifact_id, severity, score, confidence, status           |
 | `detection_rules`      | id, rule_version, platform, enabled                            |
 | `finding_rule_matches` | finding_id, rule_id, evidence                                  |
+| `cases`                | id, organization_id, title, status                            |
+| `case_findings`        | case_id, scan_job_id, source, artifact_index, evidence, attached_at |
+| `coverage_validations` | organization_id, use_case_id, result, tested_on, reference, recorded_by |
 | `audit_events`         | actor_id, action, target_id, timestamp                         |
 
 **Important:** Lahat ng tenant-owned records ay dapat may organization scope, directly or through enforced parent relationships. Gumamit ng database constraints, scoped queries, at optional PostgreSQL Row-Level Security para maiwasan ang cross-organization data leakage.
+
+The ATT&CK Coverage Matrix stores tenant deployment test records with their
+outcome, test date, reference, recorder, and audit event. The catalog identifies
+each use case by its group code and technique ID. Deployment records remain
+separate from product fixture evidence and product coverage classifications.
+
+Admin and analyst users attach scored findings from **Scan History** to an existing
+case. The backend verifies the current server assessment and stores a snapshot
+with the source scan ID, score, reasons, and ATT&CK context. Composite foreign
+keys enforce that both records belong to the same tenant. **Cases → Evidence**
+shows the saved snapshot even when a later assessment changes.
 
 ### **Example SQL Schema**
 
@@ -280,14 +317,20 @@ Signed agents and rule bundles
 
 ## **Role-Based Access Control**
 
+PersistGuard has three application roles. Apply the permissions below within
+the user's authorized organization. GUI presentation follows the GUI baseline.
+
 | Permission             | Admin | Analyst | Viewer |
 | ---------------------- | ----- | ------- | ------ |
 | View endpoints         | ✓     | ✓       | ✓      |
 | View findings          | ✓     | ✓       | ✓      |
 | Start scans            | ✓     | ✓       | —      |
-| Investigate findings   | ✓     | ✓       | —      |
+| Attach findings and update cases | ✓ | ✓ | — |
 | Enroll endpoints       | ✓     | —       | —      |
-| Modify detection rules | ✓     | —       | —      |
+| View detection rules and version history | ✓ | ✓ | ✓ |
+| View deployment validation evidence | ✓ | ✓ | ✓ |
+| Record deployment validation evidence | ✓ | ✓ | — |
+| Create, test, publish, import, or export detection rules | ✓ | — | — |
 | Manage users           | ✓     | —       | —      |
 
 Magkaroon din ng endpoint group permissions para halimbawa, ang analyst ng Finance department ay hindi automatic na makakapag-scan ng HR computers.
@@ -360,6 +403,32 @@ response:
 ```
 
 Mas mainam na gumawa ng typed, validated rule schema kaysa direktang mag-execute ng YAML expressions o user-supplied scripts.
+
+The current YAML import profile uses the fields supported by the Windows rule
+editor. Use **Rules and Detection → Import YAML** to validate it and create an
+unpublished draft. The existing sample test and publication flow applies to
+imported drafts. The broader rule format above describes target capabilities.
+
+```yaml
+schema_version: 1
+title: Fixture service command
+platform: windows
+conditions:
+  source: services
+  field: command
+  contains: fixture-agent.exe
+risk:
+  base_score: 40
+response:
+  action: alert_only
+```
+
+The source accepts `registry`, `scheduled_tasks`, or `services`. The field accepts
+`path` or `command`, and `contains` uses a case-insensitive literal comparison.
+Each import accepts one YAML document of up to 16 KiB.
+Admins can export the saved draft and individual published versions as YAML.
+Exported files contain the definition. Importing an export starts a new draft
+with its own rule identity and sample-test workflow.
 
 # **7. Centralized Scan Scheduling**
 
@@ -463,6 +532,10 @@ Build YAML rule validator and engine
 Implement explainable severity scoring
 
 Create five severity cards and findings table
+
+The Findings view uses the existing tenant-scoped scan assessment pipeline.
+Cards and table results cover the displayed batch of scans. Newer and Older scans
+move between batches while findings are paginated within the selected batch.
 
 Add search, filtering, and investigation view
 
