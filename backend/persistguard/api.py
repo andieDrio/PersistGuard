@@ -751,6 +751,37 @@ def set_detection_rule_activation(
     return result
 
 
+
+class RuleRollback(BaseModel):
+    revision: int = Field(ge=1)
+    version: int = Field(ge=1)
+
+
+@app.post("/api/detection-rules/{rule_id}/rollback", tags=["Detection Rules"])
+def rollback_detection_rule(
+    rule_id: UUID, data: RuleRollback,
+    user: Annotated[AuthenticatedUser, Depends(linked_account)],
+    session: Annotated[Session, Depends(database_session)],
+) -> RuleSummary:
+    action = "detection_rules.rollback"
+    rule = rule_for_update(session, user, rule_id, data.revision, action)
+    if rule.published_version is None:
+        raise HTTPException(status_code=409, detail="No published version to restore")
+    if data.version == rule.published_version and rule.enabled:
+        raise HTTPException(status_code=409, detail="This version is already active")
+    previous = session.get(PublishedDetectionRule, (rule.id, data.version))
+    if previous is None:
+        raise HTTPException(status_code=404, detail="Published rule version not found")
+    # Keep draft content and immutable published history intact. Only switch
+    # the active published-version pointer; scan assessments read that pointer.
+    rule.published_version = previous.version
+    rule.enabled = True
+    rule.revision += 1
+    result = summarize_rule(rule)
+    commit_audit_event(session, user, action, 200, target_id=rule_id)
+    return result
+
+
 def summarize_scan_job(job: ScanJob) -> ScanJobSummary:
     return ScanJobSummary(job.id, job.organization_id, job.endpoint_id, job.scan_type, job.status, job.created_at)
 
