@@ -587,7 +587,8 @@ To verify Services coverage under the deployment account, identify the running
 service and its configured account on the endpoint.
 
 ```powershell
-Get-CimInstance Win32_Service -Filter "Name = 'PersistGuardAgent'" | Select-Object Name, State, StartName
+Get-Service -Name 'PersistGuardAgent' | Select-Object Name, Status
+Get-ItemPropertyValue -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\PersistGuardAgent' -Name ObjectName
 ```
 
 Use the service name from that installation. Queue a new inventory scan and

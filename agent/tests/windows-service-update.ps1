@@ -22,7 +22,8 @@ $key = Join-Path $root 'device-key.dpapi'
 $certificate = Join-Path $root 'client.pem'
 $thumbprint = 'A' * 40
 $updater = Join-Path $PSScriptRoot '../update-windows-service.ps1'
-$commandLine = '"{0}" --windows-service --watch-inventory-jobs --device-key "{1}" --client-cert "{2}"' -f $installed, $key, $certificate
+$registeredExe = '%TEMP%\{0}\persistguard-agent.exe' -f (Split-Path -Leaf $root)
+$commandLine = '"{0}" --windows-service --watch-inventory-jobs --device-key "{1}" --client-cert "{2}"' -f $registeredExe, $key, $certificate
 
 # Use real Windows file operations with a disposable service-controller fixture.
 $fixture = [PSCustomObject]@{
@@ -49,10 +50,10 @@ $fixture | Add-Member ScriptMethod WaitForStatus {
     param($Status, $Timeout)
     if ($this.Status -ne $Status) { throw "Fixture failed to reach $Status within $Timeout." }
 }
-function Get-CimInstance($ClassName, $Filter) {
-    Assert-Equal $ClassName 'Win32_Service' 'Unexpected CIM class'
-    Assert-Equal $Filter "Name = 'PersistGuardAgent'" 'Unexpected CIM service filter'
-    [PSCustomObject]@{ PathName = $commandLine }
+function Get-ItemPropertyValue($LiteralPath, $Name) {
+    Assert-Equal $LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\PersistGuardAgent' 'Unexpected service registration'
+    Assert-Equal $Name 'ImagePath' 'Unexpected service registration property'
+    $commandLine
 }
 function Get-Service($Name) {
     Assert-Equal $Name 'PersistGuardAgent' 'Unexpected service name'

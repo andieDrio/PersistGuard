@@ -18,17 +18,18 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 }
 
 $serviceName = 'PersistGuardAgent'
-$config = Get-CimInstance Win32_Service -Filter "Name = '$serviceName'"
-if ($config.PathName -notmatch '^\s*(?:"([^"]+)"|([^\s"]+))(?=\s|$)') {
+$service = Get-Service -Name $serviceName
+$command = Get-ItemPropertyValue -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName" -Name ImagePath
+if ($command -notmatch '^\s*(?:"([^"]+)"|([^\s"]+))(?=\s|$)') {
     throw 'Could not read the installed PersistGuardAgent executable path.'
 }
 $installed = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+$installed = [Environment]::ExpandEnvironmentVariables($installed)
 if ($installed -notmatch '^[A-Za-z]:[\\/]' -or [IO.Path]::GetExtension($installed) -ine '.exe') {
     throw 'The service must use an absolute local executable path. Quote the path if it contains spaces.'
 }
 $installed = [IO.Path]::GetFullPath($installed)
 $directory = [IO.Path]::GetDirectoryName($installed)
-$service = Get-Service -Name $serviceName
 $timeout = [TimeSpan]::FromSeconds(30)
 
 function Stop-AgentService {
