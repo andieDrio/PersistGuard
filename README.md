@@ -281,6 +281,21 @@ still poll for full scans. A targeted job stays queued until an agent that
 supports targeted scans polls or an operator cancels it. Apply migration
 `0016_targeted_scans` and upgrade the gateway before scheduling targeted scans.
 
+### Schedule recurring Windows scans
+
+Apply migration `0017_scan_schedules`, then start the FastAPI backend. The API
+checks for due schedules at startup and about every 30 seconds. Open **Scan history**
+→ **Scan schedules** in the connected dashboard. Admins and analysts can create a
+daily or weekly schedule for an approved Windows endpoint and a scan scope, and
+can edit its timing, pause it, or resume it. Viewers can read schedules and outcomes.
+
+The first run uses the browser's local time. Recurrence is every 24 hours or 7 days
+from that instant, which can shift the displayed time when daylight saving changes.
+If there is already an unfinished scan, that occurrence is skipped. Late runs queue
+at most once per schedule and advance to the next future occurrence. An ineligible
+endpoint or loss of the schedule owner's access pauses the schedule at its next
+attempt. Pausing a schedule leaves jobs already in Scan history in the queue.
+
 ### List or cancel queued scans
 
 Linked users can list scans in their organization. The list supports `status`,

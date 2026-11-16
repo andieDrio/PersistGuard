@@ -214,6 +214,33 @@ class AgentCredential(Base):
     )
 
 
+class ScanSchedule(Base):
+    __tablename__ = "scan_schedules"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column()
+    endpoint_id: Mapped[UUID] = mapped_column()
+    requested_by: Mapped[UUID] = mapped_column()
+    scan_type: Mapped[str] = mapped_column(Text)
+    frequency: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(server_default="true")
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_outcome: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        ForeignKeyConstraint(["endpoint_id", "organization_id"], ["endpoints.id", "endpoints.organization_id"]),
+        UniqueConstraint("id", "organization_id", name="uq_scan_schedules_id_org"),
+        UniqueConstraint("organization_id", "endpoint_id", "scan_type", name="uq_scan_schedules_endpoint_scope"),
+        CheckConstraint("scan_type IN ('persistence_full_scan', 'persistence_registry_scan', "
+                        "'persistence_scheduled_tasks_scan', 'persistence_services_scan')", name="ck_scan_schedules_type"),
+        CheckConstraint("frequency IN ('daily', 'weekly')", name="ck_scan_schedules_frequency"),
+        CheckConstraint("last_outcome IN ('queued', 'skipped_busy', 'paused_endpoint', 'paused_owner')",
+                        name="ck_scan_schedules_outcome"),
+        Index("ix_scan_schedules_due", next_run_at, id, postgresql_where=enabled.is_(True)),
+    )
+
+
 class ScanJob(Base):
     __tablename__ = "scan_jobs"
 
@@ -221,6 +248,7 @@ class ScanJob(Base):
     organization_id: Mapped[UUID] = mapped_column()
     endpoint_id: Mapped[UUID] = mapped_column()
     requested_by: Mapped[UUID] = mapped_column()
+    schedule_id: Mapped[UUID | None] = mapped_column()
     scan_type: Mapped[str] = mapped_column(Text)
     result: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -229,6 +257,8 @@ class ScanJob(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(["endpoint_id", "organization_id"], ["endpoints.id", "endpoints.organization_id"]),
+        ForeignKeyConstraint(["schedule_id", "organization_id"], ["scan_schedules.id", "scan_schedules.organization_id"],
+                             name="fk_scan_jobs_schedule_org"),
         UniqueConstraint("id", "organization_id", name="uq_scan_jobs_id_org"),
         CheckConstraint("scan_type IN ('persistence_full_scan', 'persistence_registry_scan', "
                         "'persistence_scheduled_tasks_scan', 'persistence_services_scan')", name="ck_scan_jobs_type"),

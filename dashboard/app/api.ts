@@ -6,6 +6,7 @@ export async function readAPI<T>(path: string, token: string, signal: AbortSigna
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new Error("Access denied. Check your API access token and role.");
     if ((path.startsWith("workspace/") || path.startsWith("detection-rules") || path.startsWith("attack-coverage/") ||
+         path.startsWith("scan-schedules") ||
          (path.startsWith("endpoints/") && (path.endsWith("/revoke") || path.endsWith("/scan-jobs")))) && [404, 409, 422].includes(response.status)) {
       const info = await response.json().catch(() => null);
       throw new Error(typeof info?.detail === "string" ? info.detail : "Check the form and try again.");

@@ -87,6 +87,9 @@ h1 { font-size: clamp(27px, 3vw, 36px); font-weight: 740; letter-spacing: -.065e
 .coverage-filters .search { min-width: min(240px, 100%); }
 .coverage-table { min-width: 790px; }
 .coverage-table td small { display: block; color: var(--muted); margin-top: 4px; }
+.scan-schedules-table { min-width: 680px; }
+.scan-schedules-table td small { display: block; color: var(--muted); margin-top: 4px; }
+.scan-schedules-table td .heading-actions { flex-wrap: nowrap; }
 .coverage-evidence { display: grid; gap: 9px; margin: 12px 0; }
 .coverage-evidence dt { font-weight: 700; }
 .coverage-evidence dd { margin: 3px 0 0; color: var(--muted); }

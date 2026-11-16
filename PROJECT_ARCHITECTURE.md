@@ -325,6 +325,8 @@ the user's authorized organization. GUI presentation follows the GUI baseline.
 | View endpoints         | ✓     | ✓       | ✓      |
 | View findings          | ✓     | ✓       | ✓      |
 | Start scans            | ✓     | ✓       | —      |
+| View recurring scan schedules | ✓ | ✓ | ✓ |
+| Create, edit, pause, and resume scan schedules | ✓ | ✓ | — |
 | Attach findings and update cases | ✓ | ✓ | — |
 | Enroll endpoints       | ✓     | —       | —      |
 | Revoke approved endpoints | ✓ | — | — |
@@ -444,8 +446,15 @@ Dapat suportahan ang tatlong scan modes:
 | Mode              | Trigger                  | Purpose                          |
 | ----------------- | ------------------------ | -------------------------------- |
 | Full Scan         | Manual / scheduled       | Comprehensive enumeration        |
-| Targeted Scan     | Manual search            | Specific paths, keys, mechanisms |
+| Targeted Scan     | Manual / scheduled       | One supported Windows collector  |
 | Differential Scan | Scheduled / event-driven | Changes since last baseline      |
+
+The API scheduler persists one daily or weekly schedule per Windows endpoint and
+scan scope. Each due occurrence rechecks the endpoint and schedule owner's access
+and queues an ordinary inventory job with its schedule ID. PostgreSQL row locks
+coordinate API replicas and the manual queue. An existing unfinished scan skips
+that occurrence. A late scheduler tick handles at most one occurrence per schedule
+and advances to the next future UTC time on the same interval.
 
 ## **Suggested Scan Lifecycle**
 

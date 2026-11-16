@@ -19,6 +19,8 @@ const versions = [2, 1].map(version => ({
 }));
 const restoredRules = new Map();
 const queuedScans = new Map();
+const scanSchedules = new Map();
+const fixtureScheduleId = "0a27d2c2-e7ea-40d1-bbe1-a1b047bf36a4";
 const sourceScan = {
   id: "9d0be757-f8b9-4cbe-856e-dff4ba0c4e95", endpoint_id: endpoint.id,
   status: "partial", scan_type: "persistence_full_scan", created_at: "2025-12-01T00:00:00Z",
@@ -64,6 +66,10 @@ createServer(async (request, response) => {
   if (request.method === "GET") {
     switch (pathname) {
       case "/api/scan-jobs": return send(200, queuedScans.get(authorization) ?? []);
+      case "/api/scan-schedules": return send(200, { has_more: false, schedules: scanSchedules.has(authorization) ?
+        [scanSchedules.get(authorization)] : role === "viewer" ? [{ id: fixtureScheduleId, endpoint_id: endpoint.id,
+          hostname: endpoint.hostname, scan_type: "persistence_services_scan", frequency: "weekly", enabled: true,
+          next_run_at: "2038-02-08T01:30:00Z", last_run_at: "2026-11-17T01:30:00Z", last_outcome: "skipped_busy" }] : [] });
       case `/api/scan-jobs/${sourceScan.id}`: return send(200, sourceScan);
       case `/api/scan-jobs/${sourceScan.id}/assessment`: return send(200, {
         status: "partial", baseline_job_id: null, collectors: {
@@ -97,6 +103,25 @@ createServer(async (request, response) => {
     }
   }
 
+  if (request.method === "POST" && pathname === "/api/scan-schedules") {
+    if (role === "viewer") return send(403, { detail: "Recurring scans require an admin or analyst" });
+    if (scanSchedules.has(authorization)) return send(409, { detail: "This endpoint already has a schedule for this scope. Edit the existing schedule." });
+    const body = await readJSON(request);
+    if (body?.endpoint_id !== endpoint.id) return send(404, { detail: "Endpoint not found" });
+    const schedule = { ...body, id: fixtureScheduleId, hostname: endpoint.hostname, enabled: true,
+      last_run_at: null, last_outcome: null };
+    scanSchedules.set(authorization, schedule);
+    return send(201, schedule);
+  }
+  if (request.method === "PATCH" && pathname === `/api/scan-schedules/${fixtureScheduleId}`) {
+    if (role === "viewer") return send(403, { detail: "Recurring scans require an admin or analyst" });
+    const schedule = scanSchedules.get(authorization);
+    if (!schedule) return send(404, { detail: "Scan schedule not found" });
+    const body = await readJSON(request);
+    const updated = { ...schedule, ...body?.timing, enabled: body?.enabled ?? schedule.enabled };
+    scanSchedules.set(authorization, updated);
+    return send(200, updated);
+  }
   if (request.method === "POST" && pathname === `/api/endpoints/${endpoint.id}/revoke`) {
     if (!isAdmin) return send(403, { detail: "Administrator access required" });
     revoked.add(authorization);

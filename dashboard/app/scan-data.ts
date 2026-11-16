@@ -4,6 +4,7 @@ export type Job = {
   status: string;
   created_at: string;
   scan_type: string;
+  schedule_id?: string | null;
   endpointLabel?: string;
 };
 
