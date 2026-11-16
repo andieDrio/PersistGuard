@@ -456,6 +456,11 @@ coordinate API replicas and the manual queue. An existing unfinished scan skips
 that occurrence. A late scheduler tick handles at most one occurrence per schedule
 and advances to the next future UTC time on the same interval.
 
+Run history records the planned time, attempt time, and outcome of each processed
+occurrence in the same transaction as the schedule update and any new scan job.
+The tenant-scoped history shows the current status of linked jobs using the
+existing scan queue and preserves skipped and automatically paused attempts.
+
 ## **Suggested Scan Lifecycle**
 
 ```

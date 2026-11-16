@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Plus, RefreshCw, X } from "lucide-react";
 import { readAPI } from "./api";
 import { ScanTargetFields } from "./scan-controls";
-import { scanTypeLabel } from "./scan-data";
+import { isUUID, scanScheduleHistoryHref, scanTypeLabel, scheduledScanHref } from "./scan-data";
 
 type Frequency = "daily" | "weekly";
 type Schedule = {
@@ -12,6 +12,11 @@ type Schedule = {
   next_run_at: string; last_run_at: string | null; last_outcome: keyof typeof outcomes | null;
 };
 type SchedulePage = { schedules: Schedule[]; has_more: boolean };
+type ScheduleRun = {
+  id: string; scheduled_for: string | null; attempted_at: string; outcome: keyof typeof outcomes;
+  job_id: string | null; job_status: string | null;
+};
+type RunPage = { schedule: Schedule; runs: ScheduleRun[]; has_more: boolean };
 const frequencies = { daily: "Daily", weekly: "Weekly" };
 const outcomes = { queued: "Queued", skipped_busy: "Skipped · unfinished scan", paused_endpoint: "Paused · endpoint ineligible",
   paused_owner: "Paused · scheduler access changed" };
@@ -139,18 +144,21 @@ export function ScanSchedules({ token, canManage }: { token: string; canManage: 
       {active?.data && <>
         {active.data.schedules.length ? <div className="table-scroll"><table className="scan-schedules-table">
           <thead><tr><th>Endpoint</th><th>Scan scope</th><th>Repeat</th><th>Next run</th><th>Last attempt</th>
-            {canManage && <th>Actions</th>}</tr></thead>
+            <th>Actions</th></tr></thead>
           <tbody>{active.data.schedules.map(schedule => <tr key={schedule.id}>
             <td>{schedule.hostname}<small className="mono">{schedule.endpoint_id.slice(0, 8)}</small></td>
             <td>{scanTypeLabel(schedule.scan_type)}</td><td>{frequencies[schedule.frequency]}</td>
             <td>{schedule.enabled ? timeFormat.format(new Date(schedule.next_run_at)) : "Paused"}</td>
             <td>{schedule.last_outcome ? outcomes[schedule.last_outcome] : "—"}
               {schedule.last_run_at && <small>{timeFormat.format(new Date(schedule.last_run_at))}</small>}</td>
-            {canManage && <td><div className="heading-actions">
-              <button type="button" className="button" disabled={!!saving} onClick={() => { setIssue(""); setNotice(""); setEditor(schedule); }}>Edit</button>
-              <button type="button" className="button" disabled={!!saving} onClick={() => void toggle(schedule)}>
-                {saving === schedule.id ? "Saving…" : schedule.enabled ? "Pause" : "Resume"}</button>
-            </div></td>}
+            <td><div className="heading-actions">
+              <a className="button" href={scanScheduleHistoryHref(schedule.id)}>Run history</a>
+              {canManage && <>
+                <button type="button" className="button" disabled={!!saving} onClick={() => { setIssue(""); setNotice(""); setEditor(schedule); }}>Edit</button>
+                <button type="button" className="button" disabled={!!saving} onClick={() => void toggle(schedule)}>
+                  {saving === schedule.id ? "Saving…" : schedule.enabled ? "Pause" : "Resume"}</button>
+              </>}
+            </div></td>
           </tr>)}</tbody>
         </table></div> : <p className="section-note" role="status">No scan schedules on this page.</p>}
         {(offset > 0 || active.data.has_more) && <footer className="pagination"><span>Page {offset / pageSize + 1}</span><div>
@@ -163,5 +171,60 @@ export function ScanSchedules({ token, canManage }: { token: string; canManage: 
       setNotice(editor === "new" ? "Scan schedule created." : "Scan schedule updated.");
       setEditor(null); setOffset(editor === "new" ? 0 : offset); reload();
     }} />}
+  </main>;
+}
+
+export function ScanScheduleHistory({ token, scheduleId }: { token: string; scheduleId: string | null }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [offset, setOffset] = useState(0);
+  const [revision, setRevision] = useState(0);
+  const [loaded, setLoaded] = useState<{ offset: number; data?: RunPage; error?: string }>();
+  const active = loaded?.offset === offset ? loaded : undefined;
+  const data = active?.data;
+  const valid = isUUID(scheduleId);
+
+  useEffect(() => {
+    heading.current?.closest(".app-scroll")?.scrollTo({ top: 0 });
+    heading.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (!token || !valid) return;
+    const request = new AbortController();
+    readAPI<RunPage>(`scan-schedules/${scheduleId}/runs?limit=${pageSize}&offset=${offset}`, token, request.signal)
+      .then(data => { if (!request.signal.aborted) setLoaded({ offset, data }); })
+      .catch((cause: Error) => { if (!request.signal.aborted) setLoaded({ offset, error: cause.message }); });
+    return () => request.abort();
+  }, [scheduleId, valid, offset, revision, token]);
+
+  return <main>
+    <div className="heading"><div><h1 ref={heading} tabIndex={-1}>Run history</h1>
+      {data && <p>{data.schedule.hostname} · {scanTypeLabel(data.schedule.scan_type)}</p>}</div>
+      <div className="heading-actions">
+        <a className="button" href="#scan-schedules"><ArrowLeft size={15} />Scan schedules</a>
+        {valid && token && <button type="button" className="button refresh" onClick={() => setRevision(value => value + 1)}>
+          <RefreshCw size={15} />Refresh history</button>}
+      </div></div>
+    {!valid ? <p className="api-error" role="alert">This scan schedule link is invalid.</p> :
+      !token ? <p className="panel section-note">Connect the API to view run history.</p> :
+      active?.error ? <p className="api-error" role="alert">{active.error}</p> :
+      !data ? <p className="panel section-note" role="status">Loading run history…</p> :
+      <section className="panel jobs" aria-label="Schedule runs">
+        {data.runs.length ? <div className="table-scroll"><table className="scan-schedules-table">
+          <thead><tr><th>Scheduled for</th><th>Attempted at</th><th>Outcome</th><th>Scan job</th></tr></thead>
+          <tbody>{data.runs.map(run => <tr key={run.id}>
+            <td>{run.scheduled_for ? timeFormat.format(new Date(run.scheduled_for)) : "—"}</td>
+            <td>{timeFormat.format(new Date(run.attempted_at))}</td>
+            <td>{outcomes[run.outcome]}</td>
+            <td>{run.job_id ? <><a className="source-scan-link mono" href={scheduledScanHref(run.job_id, data.schedule.id)}>
+              Scan #{run.job_id.slice(0, 8)}</a>
+              {run.job_status && <small>{run.job_status[0].toUpperCase() + run.job_status.slice(1)}</small>}</> : "—"}</td>
+          </tr>)}</tbody>
+        </table></div> : <p className="section-note" role="status">{offset ? "No runs on this page." : "This schedule has no runs yet."}</p>}
+        {(offset > 0 || data.has_more) && <footer className="pagination"><span>Page {offset / pageSize + 1}</span><div>
+          <button className="button" type="button" disabled={!offset} onClick={() => setOffset(offset - pageSize)}>Previous page</button>
+          <button className="button" type="button" disabled={!data.has_more} onClick={() => setOffset(offset + pageSize)}>Next page</button>
+        </div></footer>}
+      </section>}
   </main>;
 }
