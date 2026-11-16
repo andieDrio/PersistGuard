@@ -124,6 +124,9 @@ func runGatewayCommand(ctx context.Context, server *url.URL, keyPath, certPath, 
 		if len(payload) > 0 {
 			request.Header.Set("Content-Type", "application/json")
 		}
+		if path == "scan-jobs/poll" {
+			request.Header.Set("X-PersistGuard-Targeted-Scans", "1")
+		}
 		response, err := client.Do(request)
 		if err != nil {
 			return 0, nil, fmt.Errorf("connect to gateway: %w", err)
@@ -143,7 +146,7 @@ func runGatewayCommand(ctx context.Context, server *url.URL, keyPath, certPath, 
 		return response.StatusCode, body, nil
 	}
 	if operation == "scan-jobs/run" {
-		return executeInventoryJob(ctx, send, writeWindowsInventory, output)
+		return executeInventoryJob(ctx, send, writeWindowsScan, output)
 	}
 	status, body, err := send(method, operation, nil)
 	if err != nil {

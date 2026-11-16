@@ -13,7 +13,7 @@ type dispatchedScanJob struct {
 	Status   string `json:"status"`
 }
 
-func pollScanJob(db *sql.DB) func(http.ResponseWriter, context.Context, deviceCredential) {
+func pollScanJob(db *sql.DB, targeted bool) func(http.ResponseWriter, context.Context, deviceCredential) {
 	return func(w http.ResponseWriter, ctx context.Context, device deviceCredential) {
 		// Recheck the credential in the dispatch statement. Repeated polls return the same dispatched job.
 		const dispatch = `WITH authorized AS (
@@ -24,7 +24,7 @@ func pollScanJob(db *sql.DB) func(http.ResponseWriter, context.Context, deviceCr
 			UPDATE scan_jobs AS job SET status = 'dispatched'
 			FROM authorized
 			WHERE job.endpoint_id = authorized.id AND job.organization_id = authorized.organization_id
-			  AND job.scan_type = 'persistence_full_scan' AND job.status IN ('queued', 'dispatched')
+			  AND (job.scan_type = 'persistence_full_scan' OR $5) AND job.status IN ('queued', 'dispatched')
 			RETURNING job.id::text, job.scan_type, job.status
 		)
 		SELECT EXISTS (SELECT 1 FROM authorized), dispatched.id, dispatched.scan_type, dispatched.status
@@ -32,7 +32,7 @@ func pollScanJob(db *sql.DB) func(http.ResponseWriter, context.Context, deviceCr
 		var authorized bool
 		var id, scanType, status sql.NullString
 		if err := db.QueryRowContext(ctx, dispatch, device.serial, device.certificatePEM,
-			device.identity.EndpointID, device.identity.OrganizationID).Scan(&authorized, &id, &scanType, &status); err != nil {
+			device.identity.EndpointID, device.identity.OrganizationID, targeted).Scan(&authorized, &id, &scanType, &status); err != nil {
 			http.Error(w, "scan queue unavailable", http.StatusServiceUnavailable)
 			return
 		}

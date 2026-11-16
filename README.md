@@ -270,10 +270,16 @@ $job = Invoke-RestMethod -Method Post "http://127.0.0.1:8000/api/endpoints/$($de
 Invoke-RestMethod "http://127.0.0.1:8000/api/scan-jobs/$($job.id)" -Headers $headers
 ```
 
-The request queues the fixed `persistence_full_scan` inventory job. It returns
-`201` for a new job and `200` with the existing job if the endpoint already has
-one open. Linked users in the same organization can read the job status. The
-job stays queued until the enrolled agent polls the gateway.
+An empty request queues `persistence_full_scan`. To queue one collector, select
+**Scan scope** in the dashboard or send JSON with `scan_type` set to
+`persistence_registry_scan`, `persistence_scheduled_tasks_scan`, or
+`persistence_services_scan`.
+
+The API returns `201` for a new job, `200` for an unfinished job with the same
+scope, and `409` if an unfinished job has a different scope. An older agent can
+still poll for full scans. A targeted job stays queued until an agent that
+supports targeted scans polls or an operator cancels it. Apply migration
+`0016_targeted_scans` and upgrade the gateway before scheduling targeted scans.
 
 ### List or cancel queued scans
 
@@ -609,7 +615,10 @@ signals from the uploaded report. It does not accept client-supplied signature,
 hash, or other independent evidence.
 
 The assessment selects the most recent earlier saved `completed` or `partial`
-scan for the same endpoint and organization. Each artifact reports a
+scan of a compatible scope for the same endpoint and organization. Full scans
+compare with full scans. Targeted scans can compare with a full scan or one
+of the same collector. Coverage for targeted scans shows the requested
+collector. Each artifact reports a
 `baseline_status` of `new`, `existing`, or `unknown`. Only comparable Registry
 locations and fully collected Scheduled Tasks or Services reports contribute a
 new-entry signal. HKCU stays `unknown` because the current reports do not

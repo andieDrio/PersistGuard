@@ -560,6 +560,15 @@ Run security and performance validation
 
 ## **9. Recommended MVP Acceptance Criteria**
 
+Windows scan requests select either full inventory or one collector (Registry,
+Scheduled Tasks, or Services). The requested scope is stored in `scan_type`.
+The gateway dispatches collector-specific jobs only to agents that advertise
+targeted scan support on poll and accepts results for the stored scope. A
+targeted job queued for an older agent can be canceled or run after upgrade.
+Full scans use full scans as baselines. Targeted scans use the latest eligible
+full scan or a scan of the same collector. Unrequested collectors are omitted
+from the assessment.
+
 Bago mo tawaging working MVP ang PersistGuard, dapat pumasa ito sa sumusunod:
 
 - Isang administrator ang makakapag-enroll at makakapag-revoke ng endpoint.
@@ -606,6 +615,11 @@ audit events. The service completed follow-up scan
 `8049dd74-e65b-4b68-81d8-e40dde2892fb`, and the test script restored the original gateway. The
 fixture started inside the window, so this check covered the renewal path
 when due.
+
+On 2026-11-16, a separate loopback Windows test exercised all three targeted
+scopes with the rebuilt agent. Registry and Scheduled Tasks finished as
+`completed`; Services finished as `partial`. Each upload and assessment
+contained only the requested collector.
 
 ## **10. Recommended Starting Configuration**
 

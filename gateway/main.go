@@ -117,7 +117,9 @@ func gatewayHandler(db *sql.DB, rotation *rotationService) http.Handler {
 			LastSeen time.Time `json:"last_seen"`
 		}{device.identity, lastSeen.UTC()})
 	}))
-	mux.HandleFunc("POST /api/agent/scan-jobs/poll", withDevice(db, pollScanJob(db)))
+	mux.HandleFunc("POST /api/agent/scan-jobs/poll", func(w http.ResponseWriter, r *http.Request) {
+		withDevice(db, pollScanJob(db, r.Header.Get("X-PersistGuard-Targeted-Scans") == "1"))(w, r)
+	})
 	mux.HandleFunc("PUT /api/agent/scan-jobs/{job_id}/result", func(w http.ResponseWriter, r *http.Request) {
 		withDevice(db, func(w http.ResponseWriter, _ context.Context, device deviceCredential) {
 			storeScanResult(db, w, r, device)

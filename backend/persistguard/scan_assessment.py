@@ -9,14 +9,15 @@ from persistguard.scan_baseline import compare_inventory
 
 
 def assess_scan_report(report: dict, endpoint_id: str, baseline_report: dict | None = None,
-                       rules: tuple[CustomRule, ...] = (), indicators: frozenset[tuple[str, str]] = frozenset()) -> dict:
+                       rules: tuple[CustomRule, ...] = (), indicators: frozenset[tuple[str, str]] = frozenset(),
+                       *, target_source: Source | None = None) -> dict:
     collectors = report.get("collectors") if isinstance(report, dict) else None
     if not isinstance(collectors, dict):
         collectors = {}
     previous_collectors = baseline_report.get("collectors") if isinstance(baseline_report, dict) else None
 
     results = {}
-    for source in get_args(Source):
+    for source in (target_source,) if target_source else get_args(Source):
         collector = collectors.get(source)
         if not isinstance(collector, dict):
             results[source] = {"status": "error", "error": "missing_collector_report", "coverage": [], "assessments": []}

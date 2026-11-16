@@ -33,6 +33,17 @@ app.include_router(device_enrollment_router)
 app.include_router(rotation_router)
 
 TERMINAL_SCAN_STATUSES = ("completed", "partial", "failed", "canceled")
+FULL_SCAN_TYPE = "persistence_full_scan"
+TARGETED_SCAN_SOURCES: dict[str, Source] = {
+    "persistence_registry_scan": "registry",
+    "persistence_scheduled_tasks_scan": "scheduled_tasks",
+    "persistence_services_scan": "services",
+}
+
+
+class ScanRequest(BaseModel):
+    scan_type: Literal["persistence_full_scan", "persistence_registry_scan", "persistence_scheduled_tasks_scan",
+                       "persistence_services_scan"] = FULL_SCAN_TYPE
 
 
 @app.get("/healthz", tags=["Health"])
@@ -831,12 +842,14 @@ def queue_scan_job(
     user: Annotated[AuthenticatedUser, Depends(linked_account)],
     session: Annotated[Session, Depends(database_session)],
     response: Response,
+    request: ScanRequest | None = None,
 ) -> ScanJobSummary:
     if not user.organization_active or user.role not in {"admin", "analyst"}:
         commit_audit_event(session, user, "scan_jobs.queue", 403)
         raise HTTPException(status_code=403, detail="Scan scheduling requires an active admin or analyst account")
 
     response.headers["Cache-Control"] = "no-store"
+    scan_type = request.scan_type if request else FULL_SCAN_TYPE
     try:
         endpoint = session.scalar(select(Endpoint).where(
             Endpoint.id == endpoint_id, Endpoint.organization_id == user.organization_id,
@@ -852,11 +865,13 @@ def queue_scan_job(
             ScanJob.status.not_in(TERMINAL_SCAN_STATUSES),
         ))
         if job is not None:
+            if job.scan_type != scan_type:
+                raise HTTPException(status_code=409, detail="This endpoint already has an unfinished scan of a different scope")
             response.status_code = 200
             return summarize_scan_job(job)
 
         job = ScanJob(organization_id=user.organization_id, endpoint_id=endpoint_id,
-                      requested_by=user.user_id, scan_type="persistence_full_scan")
+                      requested_by=user.user_id, scan_type=scan_type)
         session.add(job)
         session.flush()
         result = summarize_scan_job(job)
@@ -974,6 +989,7 @@ def scan_assessment(job: ScanJob, session: Session,
         baseline = session.execute(select(ScanJob.id, ScanJob.result).where(
             ScanJob.endpoint_id == job.endpoint_id,
             ScanJob.organization_id == job.organization_id,
+            ScanJob.scan_type.in_((FULL_SCAN_TYPE, job.scan_type)),
             ScanJob.status.in_(("completed", "partial")),
             ScanJob.result.is_not(None),
             ScanJob.finished_at < job.finished_at,
@@ -981,7 +997,8 @@ def scan_assessment(job: ScanJob, session: Session,
 
     rules, indicators = settings if settings is not None else assessment_settings(job.organization_id, session)
     return {"id": job.id, "scan_status": job.status, "baseline_job_id": baseline.id if baseline else None,
-            **assess_scan_report(job.result, str(job.endpoint_id), baseline.result if baseline else None, rules, indicators)}
+            **assess_scan_report(job.result, str(job.endpoint_id), baseline.result if baseline else None, rules, indicators,
+                                 target_source=TARGETED_SCAN_SOURCES.get(job.scan_type))}
 
 
 def finding_evidence(finding: dict, assessment: dict) -> dict:

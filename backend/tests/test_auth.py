@@ -520,10 +520,17 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.client.post(cancel, headers=headers("admin")).json(), canceled.json())
         self.assertEqual(self.client.get("/api/scan-jobs?status=canceled", headers=headers("viewer")).json(), [canceled.json()])
 
-        new_job = self.client.post(route, headers=headers("admin"))
+        scope = {"scan_type": "persistence_services_scan"}
+        self.assertEqual(self.client.post(route, headers=headers("viewer"), json=scope).status_code, 403)
+        self.assertEqual(self.client.post(route, headers=headers("other"), json=scope).status_code, 404)
+        self.assertEqual(self.client.post(route, headers=headers("admin"), json={"scan_type": "unknown"}).status_code, 422)
+        new_job = self.client.post(route, headers=headers("analyst"), json=scope)
         self.assertEqual(new_job.status_code, 201)
         racing_id = new_job.json()["id"]
         self.assertNotEqual(racing_id, queued["id"])
+        self.assertEqual(new_job.json()["scan_type"], scope["scan_type"])
+        self.assertEqual(self.client.post(route, headers=headers("admin"), json=scope).json(), new_job.json())
+        self.assertEqual(self.client.post(route, headers=headers("admin")).status_code, 409)
 
         def dispatch():
             with Session(engine) as session, session.begin():
@@ -540,6 +547,21 @@ class AuthenticationTests(unittest.TestCase):
             cancel_event = session.scalars(select(AuditEvent).where(AuditEvent.target_id == queued["id"],
                                                                    AuditEvent.action == "scan_jobs.cancel")).one()
             self.assertEqual(cancel_event.status_code, 200)
+
+        with Session(engine) as session, session.begin():
+            full = session.get(ScanJob, job["id"])
+            target = session.get(ScanJob, racing_id)
+            target.status = "partial"
+            target.result = {"collectors": {"services": full.result["collectors"]["services"]}}
+            target.finished_at = full.finished_at + timedelta(minutes=2)
+            session.add(ScanJob(organization_id=org_id, endpoint_id=endpoint_id, requested_by=full.requested_by,
+                                scan_type="persistence_registry_scan", status="completed",
+                                result={"collectors": {"registry": full.result["collectors"]["registry"]}},
+                                finished_at=full.finished_at + timedelta(minutes=1)))
+        targeted = self.client.get(f"/api/scan-jobs/{racing_id}/assessment", headers=headers("viewer")).json()
+        self.assertEqual(targeted["baseline_job_id"], job["id"])
+        self.assertEqual(set(targeted["collectors"]), {"services"})
+        self.assertEqual(targeted["status"], "partial")
 
     def test_invalid_tokens(self):
         tokens = {
