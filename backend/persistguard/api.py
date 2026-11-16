@@ -9,41 +9,35 @@ from uuid import UUID
 from cryptography.hazmat.primitives.serialization import Encoding
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, load_only
 
 from persistguard.attack_coverage import CoverageUseCase, attack_coverage
+from persistguard.audit import commit_audit_event
 from persistguard.auth import AuthenticatedUser, LocalIdentity, database_session, linked_account, local_identity
 from persistguard.client_certificates import CertificateIssuanceError, issue_client_certificate
 from persistguard.custom_rules import CustomRule
 from persistguard.device_enrollment import router as device_enrollment_router
 from persistguard.enrollment import TOKEN_LIFETIME, issue_enrollment_token
 from persistguard.ioc_matching import IndicatorKind, build_ioc_index, normalize_indicator
-from persistguard.models import AgentCredential, AuditEvent, CaseFinding, CaseRecord, CoverageValidation, DetectionRule, Endpoint, Indicator, Organization, PublishedDetectionRule, ScanJob, User
+from persistguard.models import AgentCredential, CaseFinding, CaseRecord, CoverageValidation, DetectionRule, Endpoint, Indicator, Organization, PublishedDetectionRule, ScanJob, User
 from persistguard.normalize_inventory import ArtifactCommand, Source
 from persistguard.rotation import router as rotation_router
 from persistguard.rule_yaml import MAX_RULE_YAML_BYTES, RuleDefinition, RuleYAMLError, export_rule_yaml, parse_rule_yaml
 from persistguard.scan_assessment import assess_scan_report
+from persistguard.scan_queue import (
+    FULL_SCAN_TYPE, SCAN_JOB_SUMMARY_COLUMNS, TARGETED_SCAN_SOURCES, TERMINAL_SCAN_STATUSES,
+    ScanRequest, eligible_scan_endpoint, lock_scan_endpoint, open_scan_job,
+)
+from persistguard.scan_schedules import router as scan_schedules_router, scheduler_lifespan
 
 
-app = FastAPI(title="PersistGuard")
+app = FastAPI(title="PersistGuard", lifespan=scheduler_lifespan)
 app.include_router(device_enrollment_router)
 app.include_router(rotation_router)
-
-TERMINAL_SCAN_STATUSES = ("completed", "partial", "failed", "canceled")
-FULL_SCAN_TYPE = "persistence_full_scan"
-TARGETED_SCAN_SOURCES: dict[str, Source] = {
-    "persistence_registry_scan": "registry",
-    "persistence_scheduled_tasks_scan": "scheduled_tasks",
-    "persistence_services_scan": "services",
-}
-
-
-class ScanRequest(BaseModel):
-    scan_type: Literal["persistence_full_scan", "persistence_registry_scan", "persistence_scheduled_tasks_scan",
-                       "persistence_services_scan"] = FULL_SCAN_TYPE
+app.include_router(scan_schedules_router)
 
 
 @app.get("/healthz", tags=["Health"])
@@ -77,23 +71,6 @@ class UserSummary:
     id: UUID
     email: str
     role: str
-
-
-def commit_audit_event(
-    session: Session, actor: AuthenticatedUser, action: str, status_code: int, *, target_id: UUID | None = None
-) -> None:
-    statement = insert(AuditEvent.__table__).inline().values(
-        organization_id=actor.organization_id,
-        actor_id=actor.user_id,
-        target_id=target_id,
-        action=action,
-        status_code=status_code,
-    )
-    try:
-        session.execute(statement)
-        session.commit()
-    except SQLAlchemyError as error:
-        raise HTTPException(status_code=503, detail="Audit log unavailable") from error
 
 
 def require_admin(session: Session, user: AuthenticatedUser, action: str) -> None:
@@ -259,6 +236,7 @@ class ScanJobSummary:
     scan_type: str
     status: str
     created_at: datetime
+    schedule_id: UUID | None
 
 
 @dataclass(frozen=True)
@@ -832,7 +810,8 @@ def rollback_detection_rule(
 
 
 def summarize_scan_job(job: ScanJob) -> ScanJobSummary:
-    return ScanJobSummary(job.id, job.organization_id, job.endpoint_id, job.scan_type, job.status, job.created_at)
+    return ScanJobSummary(job.id, job.organization_id, job.endpoint_id, job.scan_type, job.status, job.created_at,
+                          job.schedule_id)
 
 
 @app.post("/api/endpoints/{endpoint_id}/scan-jobs", tags=["Scans"], status_code=201,
@@ -851,19 +830,13 @@ def queue_scan_job(
     response.headers["Cache-Control"] = "no-store"
     scan_type = request.scan_type if request else FULL_SCAN_TYPE
     try:
-        endpoint = session.scalar(select(Endpoint).where(
-            Endpoint.id == endpoint_id, Endpoint.organization_id == user.organization_id,
-        ).with_for_update())
+        endpoint = lock_scan_endpoint(session, user.organization_id, endpoint_id)
         if endpoint is None:
             raise HTTPException(status_code=404, detail="Endpoint not found")
-        if endpoint.status != "approved" or endpoint.os_family != "windows":
+        if not eligible_scan_endpoint(endpoint):
             raise HTTPException(status_code=409, detail="Scan requires an approved Windows endpoint")
 
-        job = session.scalar(select(ScanJob).where(
-            ScanJob.endpoint_id == endpoint_id,
-            ScanJob.organization_id == user.organization_id,
-            ScanJob.status.not_in(TERMINAL_SCAN_STATUSES),
-        ))
+        job = open_scan_job(session, user.organization_id, endpoint_id)
         if job is not None:
             if job.scan_type != scan_type:
                 raise HTTPException(status_code=409, detail="This endpoint already has an unfinished scan of a different scope")
@@ -895,9 +868,7 @@ def list_scan_jobs(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0, le=2_147_483_647)] = 0,
 ) -> list[ScanJobSummary]:
-    statement = select(ScanJob).options(load_only(
-        ScanJob.id, ScanJob.organization_id, ScanJob.endpoint_id, ScanJob.scan_type, ScanJob.status, ScanJob.created_at,
-    )).where(ScanJob.organization_id == user.organization_id)
+    statement = select(ScanJob).options(SCAN_JOB_SUMMARY_COLUMNS).where(ScanJob.organization_id == user.organization_id)
     if status is not None:
         statement = statement.where(ScanJob.status == status)
     statement = statement.order_by(ScanJob.created_at.desc(), ScanJob.id.desc()).limit(limit).offset(offset)

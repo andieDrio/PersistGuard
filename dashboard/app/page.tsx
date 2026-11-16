@@ -10,6 +10,7 @@ import { readAPI } from "./api";
 import { AttachFindingDialog } from "./case-findings";
 import { EndpointOnboarding } from "./endpoint-onboarding";
 import { ScanControlDialog, type ScanAction, type ScanTarget, type ScanTargets } from "./scan-controls";
+import { ScanSchedules } from "./scan-schedules";
 import { activeStatuses, parseScanFinding, previewAssessment, previewJobs, scanTypeLabel, sourceNames, terminalStatuses,
   type Assessment, type Finding, type Job, type ScanFindingTarget } from "./scan-data";
 import { sections, WorkspaceSection } from "./workspace";
@@ -21,7 +22,7 @@ const timeFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "
 const shortId = (id: string) => id.slice(0, 8);
 const label = (value: string) => value.replaceAll("_", " ").replace(/^./, first => first.toUpperCase());
 const findingSeverities = ["critical", "high", "medium", "low", "info"];
-type View = typeof sections[number]["id"] | "scan-history" | "endpoint-onboarding";
+type View = typeof sections[number]["id"] | "scan-history" | "scan-schedules" | "endpoint-onboarding";
 type Route = { view: View } | { view: "source-scan"; query: string; keepFindings: boolean };
 type ScanFinding = Finding & { source: string };
 
@@ -60,6 +61,7 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach, target }:
         <div><dt>Status</dt><dd><Badge status={job.status} /></dd></div>
         <div><dt>Endpoint</dt><dd className="mono endpoint-detail" title={job.endpoint_id}>{job.endpointLabel ?? shortId(job.endpoint_id)}</dd></div>
         <div><dt>Type</dt><dd>{scanTypeLabel(job.scan_type)}</dd></div>
+        {job.schedule_id && <div><dt>Trigger</dt><dd>Recurring schedule</dd></div>}
         <div><dt>Baseline</dt><dd className={assessment?.baseline_job_id ? "mono" : ""}>{assessment?.baseline_job_id ? `#${shortId(assessment.baseline_job_id)}` : "—"}</dd></div>
       </dl>
       {cancel && <div className="detail-actions"><button className="button cancel-button" type="button" onClick={cancel}>Cancel scan</button></div>}
@@ -181,7 +183,7 @@ export default function Page() {
   const currentView = view === "endpoint-onboarding" && (!live || !canOnboard) ? "endpoints" : view;
   const findingsOpen = currentView === "findings";
   const viewLabel = sections.find(section => section.id === currentView)?.label ??
-    (currentView === "scan-history" ? "Scan history" : "Endpoint onboarding");
+    (currentView === "scan-history" ? "Scan history" : currentView === "scan-schedules" ? "Scan schedules" : "Endpoint onboarding");
   const hostnames = new Map(endpoints.map(endpoint => [endpoint.id, endpoint.hostname]));
   const jobs = live ? liveJobs.map(job => ({ ...job, endpointLabel: hostnames.get(job.endpoint_id) })) : previewJobs;
   const query = search.trim().toLowerCase();
@@ -232,7 +234,7 @@ export default function Page() {
       const target = sections.find(section => section.id === id);
       if (target) setRoute({ view: target.id });
       else if (id === "scan-history" || id === "scan-detail") setRoute({ view: "scan-history" });
-      else setRoute({ view: id === "endpoint-onboarding" ? id : "dashboard" });
+      else setRoute({ view: id === "endpoint-onboarding" || id === "scan-schedules" ? id : "dashboard" });
     }
     syncView();
     window.addEventListener("hashchange", syncView);
@@ -325,7 +327,8 @@ export default function Page() {
         <nav aria-label="Workspace">
           {sections.map(({ id, label, icon: Icon }) => <a key={id} href={`#${id}`} className={currentView === id ? "nav-current" : ""}
             aria-current={currentView === id ? "page" : undefined}><Icon size={18} />{label}</a>)}
-          <a className={currentView === "scan-history" ? "nav-current" : ""} href="#scan-history" aria-current={currentView === "scan-history" ? "page" : undefined}>
+          <a className={currentView === "scan-history" || currentView === "scan-schedules" ? "nav-current" : ""}
+            href="#scan-history" aria-current={currentView === "scan-history" ? "page" : undefined}>
             <Layers3 size={18} />Scan history</a>
           {live && canOnboard && <a className={currentView === "endpoint-onboarding" ? "nav-current" : ""} href="#endpoint-onboarding"
             aria-current={currentView === "endpoint-onboarding" ? "page" : undefined}><UserRoundPlus size={18} />Endpoint onboarding</a>}
@@ -346,10 +349,12 @@ export default function Page() {
       {findingsOpen ? null : sourceScanOpen ?
         <SourceScan key={`${route.query}-${live}`} target={parseScanFinding(route.query)} token={token} endpoints={endpoints} notice={notice}
           attach={canManage ? attachFinding : undefined} /> :
+        currentView === "scan-schedules" ? <ScanSchedules key={`scan-schedules-${live}`} token={token} canManage={canManage} /> :
         currentView === "endpoint-onboarding" ? <EndpointOnboarding token={token} /> : currentView !== "scan-history" ?
         <WorkspaceSection key={`${currentView}-${live}`} section={currentView} token={token} /> : <main id="overview">
         <div className="heading"><div><h1>Scan history</h1><p>Review endpoint scans, findings, and collection coverage.</p></div>
           <div className="heading-actions">
+            {live && <a className="button" href="#scan-schedules">Scan schedules</a>}
             <button className="button refresh" type="button" disabled={!live || loading} onClick={() => { setNotice(""); void loadJobs(token, "refresh"); }}><RefreshCw size={15} className={loading && live ? "spin" : ""} /> Refresh</button>
             {live && canManage && <button className="button primary" type="button" onClick={() => { setNotice(""); setScanAction({ kind: "queue" }); }}><Plus size={16} /> Queue scan</button>}
           </div>
@@ -369,7 +374,9 @@ export default function Page() {
               </select><ChevronDown size={14} /></label></div>
             <div className="table-scroll"><table><thead><tr><th>Scan</th><th>Endpoint</th><th>Status</th><th>Created <ArrowDown size={12} /></th><th aria-label="Open details" /></tr></thead>
               <tbody>{items.map(job => <tr key={job.id} className={selected?.id === job.id ? "selected" : ""}>
-                <td><button className="scan-button" type="button" aria-pressed={selected?.id === job.id} onClick={() => setSelectedId(job.id)}><strong>{scanTypeLabel(job.scan_type)}</strong><small className="mono">#{shortId(job.id)}</small></button></td>
+                <td><button className="scan-button" type="button" aria-pressed={selected?.id === job.id} onClick={() => setSelectedId(job.id)}>
+                  <strong>{scanTypeLabel(job.scan_type)}</strong><small className="mono">#{shortId(job.id)}</small>
+                  {job.schedule_id && <small>Recurring schedule</small>}</button></td>
                 <td><span className="endpoint" title={job.endpoint_id}><Monitor size={15} /><span className="mono">{job.endpointLabel ?? shortId(job.endpoint_id)}</span></span></td>
                 <td><Badge status={job.status} /></td>
                 <td><div className="scan-date">{dateFormat.format(new Date(job.created_at))}<small>{timeFormat.format(new Date(job.created_at))}</small></div></td>

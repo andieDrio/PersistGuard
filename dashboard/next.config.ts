@@ -30,6 +30,8 @@ const config: NextConfig = {
       { source: "/pg-api/endpoints/:id/client-certificate", destination: `${api}/api/endpoints/:id/client-certificate` },
       { source: "/pg-api/endpoints/:id/revoke", destination: `${api}/api/endpoints/:id/revoke` },
       { source: "/pg-api/scan-targets", destination: `${api}/api/scan-targets` },
+      { source: "/pg-api/scan-schedules", destination: `${api}/api/scan-schedules` },
+      { source: "/pg-api/scan-schedules/:id", destination: `${api}/api/scan-schedules/:id` },
       { source: "/pg-api/endpoints/:id/scan-jobs", destination: `${api}/api/endpoints/:id/scan-jobs` },
       { source: "/pg-api/scan-jobs/:id/cancel", destination: `${api}/api/scan-jobs/:id/cancel` },
       { source: "/pg-api/scan-jobs", destination: `${api}/api/scan-jobs` },
