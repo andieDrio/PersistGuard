@@ -69,7 +69,7 @@ try {
     $inputPath = if ($isUpgrade) { $CandidatePath } else { $RollbackFrom }
     $source = Get-Item -LiteralPath $inputPath
     if ($source.PSIsContainer -or $source -isnot [IO.FileInfo]) { throw 'Provide a Windows executable file.' }
-    if (-not $isUpgrade -and ($source.DirectoryName -ine $directory -or
+    if (-not $isUpgrade -and ([IO.Path]::GetFullPath($source.DirectoryName) -ine $directory -or
             $source.Name -notmatch '\Apersistguard-agent-backup-[0-9a-f]{32}\.exe\z' -or
             ($source.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
         throw 'For rollback, use a backup executable created by this script in the service installation directory.'

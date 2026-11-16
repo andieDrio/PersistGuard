@@ -15,6 +15,7 @@ function Assert-Rejected([scriptblock]$Operation, [string]$MessagePattern) {
 
 $root = Join-Path $env:TEMP ('PersistGuard update fixture ' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
+$normalizedRoot = [IO.Path]::GetFullPath($root)
 $installed = Join-Path $root 'persistguard-agent.exe'
 $candidate = Join-Path $root 'candidate.exe'
 $key = Join-Path $root 'device-key.dpapi'
@@ -67,7 +68,7 @@ function Get-AuthenticodeSignature($LiteralPath) {
     if ($null -eq $signature) {
         return Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $LiteralPath
     }
-    Assert-Equal ([IO.Path]::GetDirectoryName($LiteralPath)) $root 'Verify the staged file in the service directory'
+    Assert-Equal ([IO.Path]::GetDirectoryName($LiteralPath)) $normalizedRoot 'Verify the staged file in the service directory'
     Assert-Equal ([IO.File]::ReadAllText($LiteralPath)) 'candidate' 'Verify the exact bytes to be installed'
     $signature
 }
@@ -95,13 +96,14 @@ try {
     try { Assert-Rejected $upgrade '*could not acquire*update lock*' } finally { $competingLock.Dispose() }
 
     $upgraded = & $upgrade
-    Assert-Equal $upgraded.ExecutablePath $installed 'Keep the registered executable path'
+    Assert-Equal $upgraded.ExecutablePath ([IO.Path]::GetFullPath($installed)) 'Keep the registered executable path'
     Assert-Equal $upgraded.Status 'Running' 'Restart a running service after upgrade'
     Assert-Equal ([IO.File]::ReadAllText($installed)) 'candidate' 'Install the candidate'
     Assert-Equal ([IO.File]::ReadAllText($upgraded.BackupPath)) 'previous' 'Retain the previous binary'
 
     Assert-Rejected { & $updater -RollbackFrom $candidate } '*backup executable created by this script*'
-    $rolledBack = & $updater -RollbackFrom $upgraded.BackupPath
+    $backupFromFixturePath = Join-Path $root ([IO.Path]::GetFileName($upgraded.BackupPath))
+    $rolledBack = & $updater -RollbackFrom $backupFromFixturePath
     Assert-Equal $rolledBack.Status 'Running' 'Restart a running service after manual rollback'
     Assert-Equal ([IO.File]::ReadAllText($installed)) 'previous' 'Restore the previous binary'
     Assert-Equal ([IO.File]::ReadAllText($rolledBack.BackupPath)) 'candidate' 'Retain the binary replaced by rollback'
