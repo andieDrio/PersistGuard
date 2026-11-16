@@ -526,6 +526,9 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/scan-jobs/$($job.id)/result" -Heade
 
 ### Build a Windows release package
 
+For production signing, canary verification, and rollback, use the
+[Windows production rollout checklist](docs/windows-production-rollout.md).
+
 From the repository root on Windows with Go installed, build an x64 test ZIP.
 The output directory and archive name include the version and the `-unsigned`
 suffix. The Windows CI job checks the archive checksum and runs `--version`
