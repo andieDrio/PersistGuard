@@ -17,6 +17,8 @@ import (
 
 const serverURLEnv = "PERSISTGUARD_AGENT_SERVER_URL"
 
+var agentVersion = "dev"
+
 func parseHTTPSURL(value, setting string) (*url.URL, error) {
 	server, err := url.Parse(strings.TrimSpace(value))
 	if err != nil || server.Scheme != "https" || server.Hostname() == "" ||
@@ -34,6 +36,7 @@ func parseHTTPSURL(value, setting string) (*url.URL, error) {
 func run(ctx context.Context, args []string, input io.Reader, output, errors io.Writer) int {
 	flags := flag.NewFlagSet("persistguard-agent", flag.ContinueOnError)
 	flags.SetOutput(errors)
+	showVersion := flags.Bool("version", false, "print the agent version and exit")
 	checkConfig := flags.Bool("check-config", false, "validate configuration and exit")
 	generateCSR := flags.Bool("generate-csr", false, "write a device certificate signing request to stdout")
 	enroll := flags.Bool("enroll", false, "read an invitation token from stdin and register this device")
@@ -66,6 +69,14 @@ func run(ctx context.Context, args []string, input io.Reader, output, errors io.
 	if flags.NArg() != 0 {
 		fmt.Fprintln(errors, "persistguard-agent takes no positional arguments")
 		return 2
+	}
+	if *showVersion {
+		if flags.NFlag() != 1 {
+			fmt.Fprintln(errors, "run --version on its own")
+			return 2
+		}
+		fmt.Fprintln(output, agentVersion)
+		return 0
 	}
 	intervalSpecified := false
 	flags.Visit(func(option *flag.Flag) {

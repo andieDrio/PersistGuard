@@ -51,6 +51,24 @@ jobs:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
       - run: go test ./...
+      - name: Verify Windows release package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = 'v0.0.0-ci'
+          $output = Join-Path $env:RUNNER_TEMP 'persistguard-release'
+          $release = ./build-windows-release.ps1 -Version $version -OutputDirectory $output -Unsigned
+          $zipName = "persistguard-agent-$version-windows-amd64-unsigned.zip"
+          $zip = Join-Path $release.FullName $zipName
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ((Get-Content -Raw -LiteralPath (Join-Path $release.FullName 'SHA256SUMS.txt')).Trim() -cne "$hash  $zipName") {
+            throw 'Windows release checksum does not match the ZIP.'
+          }
+          $extracted = Join-Path $output 'extracted'
+          Expand-Archive -LiteralPath $zip -DestinationPath $extracted
+          $agent = Join-Path $extracted 'persistguard-agent.exe'
+          $reportedVersion = & $agent --version
+          if ($LASTEXITCODE -ne 0 -or $reportedVersion -cne $version) { throw 'Unexpected Windows release version.' }
 
   gateway:
     runs-on: ubuntu-26.04
