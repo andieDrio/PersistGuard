@@ -543,6 +543,8 @@ Create five severity cards and findings table
 The Findings view uses the existing tenant-scoped scan assessment pipeline.
 Cards and table results cover the displayed batch of scans. Newer and Older scans
 move between batches while findings are paginated within the selected batch.
+The scan ID on each finding opens that scan and its exact collector evidence
+through tenant-scoped lookups, including scans outside the loaded history page.
 
 Add search, filtering, and investigation view
 

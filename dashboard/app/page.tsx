@@ -10,7 +10,8 @@ import { readAPI } from "./api";
 import { AttachFindingDialog } from "./case-findings";
 import { EndpointOnboarding } from "./endpoint-onboarding";
 import { ScanControlDialog, type ScanAction, type ScanTarget, type ScanTargets } from "./scan-controls";
-import { activeStatuses, previewAssessment, previewJobs, scanTypeLabel, sourceNames, terminalStatuses, type Assessment, type Finding, type Job } from "./scan-data";
+import { activeStatuses, parseScanFinding, previewAssessment, previewJobs, scanTypeLabel, sourceNames, terminalStatuses,
+  type Assessment, type Finding, type Job, type ScanFindingTarget } from "./scan-data";
 import { sections, WorkspaceSection } from "./workspace";
 
 const pageSize = 7;
@@ -21,6 +22,8 @@ const shortId = (id: string) => id.slice(0, 8);
 const label = (value: string) => value.replaceAll("_", " ").replace(/^./, first => first.toUpperCase());
 const findingSeverities = ["critical", "high", "medium", "low", "info"];
 type View = typeof sections[number]["id"] | "scan-history" | "endpoint-onboarding";
+type Route = { view: View } | { view: "source-scan"; query: string; keepFindings: boolean };
+type ScanFinding = Finding & { source: string };
 
 function Badge({ status }: { status: string }) {
   const tone = ["completed", "collected"].includes(status) ? "green" : status === "partial" ? "amber" :
@@ -28,18 +31,21 @@ function Badge({ status }: { status: string }) {
   return <span className={`badge ${tone}`}><span />{label(status)}</span>;
 }
 
-function ScanDetail({ job, assessment, pending, error, cancel, attach }: {
+function ScanDetail({ job, assessment, pending, error, cancel, attach, target }: {
   job: Job | undefined; assessment: Assessment | null; pending: boolean; error: string; cancel?: () => void;
-  attach?: (finding: Finding & { source: string }) => void;
+  attach?: (finding: ScanFinding) => void; target?: ScanFindingTarget;
 }) {
   const [tab, setTab] = useState<"findings" | "coverage">("findings");
   const [findingQuery, setFindingQuery] = useState("");
   const [severity, setSeverity] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const linkedOnly = Boolean(target && !showAll);
   const collectors = Object.entries(assessment?.collectors ?? {});
   const findings = collectors.flatMap(([source, collector]) => collector.assessments
     .filter(item => item.score > 0).map(item => ({ ...item, source }))).sort((a, b) => b.score - a.score);
   const terms = findingQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const visibleFindings = findings.filter(finding => {
+    if (target && linkedOnly) return finding.source === target.source && finding.artifact_index === target.artifactIndex;
     if (severity && finding.severity !== severity) return false;
     if (!terms.length) return true;
     const searchable = [finding.path, sourceNames[finding.source] ?? label(finding.source),
@@ -63,7 +69,11 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach }: {
       </div>
       {pending ? <p className="detail-note" role="status">Loading assessment…</p> : error ? <p className="detail-note" role="alert">{error}</p> : !assessment ?
         <p className="detail-note">{job.status === "canceled" ? "This scan was canceled before dispatch." : "Results will appear after the agent uploads the inventory."}</p> : tab === "findings" ? <>
-          {findings.length > 0 && <div className="finding-filters" role="group" aria-label="Filter scan findings">
+          {target && <div className="finding-filters"><div className="finding-filter-actions">
+            <button className="button" type="button" onClick={() => setShowAll(!showAll)}>
+              {linkedOnly ? "Show all findings" : "Show linked finding"}</button>
+          </div></div>}
+          {!linkedOnly && findings.length > 0 && <div className="finding-filters" role="group" aria-label="Filter scan findings">
             <label className="search"><Search size={16} /><input aria-label="Search findings" placeholder="Search reasons, paths, or ATT&CK IDs"
               value={findingQuery} onChange={event => setFindingQuery(event.target.value)} /></label>
             <div className="finding-filter-actions">
@@ -76,8 +86,9 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach }: {
             <p className="finding-result-count" role="status">{visibleFindings.length} of {findings.length} findings shown</p>
           </div>}
           <div className="detail-content">
-          {findings.length === 0 ? <p className="detail-note">No scored signals in the available inventory.</p> :
-            visibleFindings.length === 0 && <p className="detail-note">No findings match these filters.</p>}
+          {visibleFindings.length === 0 && <p className="detail-note" role="status">{linkedOnly ?
+            "The linked finding is unavailable in the current assessment." : findings.length === 0 ?
+            "No scored signals in the available inventory." : "No findings match these filters."}</p>}
           {visibleFindings.map(finding => <div className="finding" key={`${finding.source}-${finding.artifact_index}`}>
             <div className="finding-line"><span className={`severity ${finding.severity}`}>{label(finding.severity)}</span><span className="points mono">{finding.score} pts</span></div>
             <strong>{finding.reasons.join(" · ")}</strong><p title={finding.path}>{finding.path}</p>
@@ -97,6 +108,50 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach }: {
   </aside>;
 }
 
+function SourceScan({ target, token, endpoints, notice, attach }: {
+  target: ScanFindingTarget | null; token: string; endpoints: ScanTarget[]; notice: string;
+  attach?: (jobId: string, finding: ScanFinding) => void;
+}) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [loaded, setLoaded] = useState<{ job: Job; assessment: Assessment | null; error: string }>();
+  const [issue, setIssue] = useState("");
+  const jobId = target?.jobId;
+
+  useEffect(() => {
+    heading.current?.closest(".app-scroll")?.scrollTo({ top: 0 });
+    heading.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (!token || !jobId) return;
+    const request = new AbortController();
+    const path = `scan-jobs/${encodeURIComponent(jobId)}`;
+    void Promise.allSettled([
+      readAPI<Job>(path, token, request.signal),
+      readAPI<Assessment>(`${path}/assessment`, token, request.signal),
+    ]).then(([job, assessment]) => {
+      if (request.signal.aborted) return;
+      if (job.status === "rejected") { setIssue(job.reason.message); return; }
+      setLoaded({ job: job.value, assessment: assessment.status === "fulfilled" ? assessment.value : null,
+        error: assessment.status === "rejected" ? assessment.reason.message : "" });
+    });
+    return () => request.abort();
+  }, [jobId, token]);
+
+  const job = loaded && { ...loaded.job, endpointLabel: endpoints.find(endpoint => endpoint.id === loaded.job.endpoint_id)?.hostname };
+  return <main className="source-scan">
+    <div className="heading"><h1 ref={heading} tabIndex={-1}>Source scan</h1>
+      <a className="button" href="#findings"><ArrowLeft size={15} />Back to Findings</a></div>
+    {notice && <p className="action-notice" role="status"><Check size={16} />{notice}</p>}
+    {!target ? <p className="api-error" role="alert">This source scan link is invalid.</p> :
+      !token ? <p className="panel section-note">Connect the API to open this source scan.</p> :
+      issue ? <p className="api-error" role="alert">{issue}</p> :
+      !loaded || !job ? <p className="panel section-note" role="status">Loading source scan…</p> :
+      <ScanDetail job={job} target={target} assessment={loaded.assessment} pending={false} error={loaded.error}
+        attach={attach ? finding => attach(job.id, finding) : undefined} />}
+  </main>;
+}
+
 export default function Page() {
   const [token, setToken] = useState("");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
@@ -110,10 +165,10 @@ export default function Page() {
   const [notice, setNotice] = useState("");
   const [canManage, setCanManage] = useState(false);
   const [canOnboard, setCanOnboard] = useState(false);
-  const [view, setView] = useState<View>("dashboard");
+  const [route, setRoute] = useState<Route>({ view: "dashboard" });
   const [endpoints, setEndpoints] = useState<ScanTarget[]>([]);
   const [scanAction, setScanAction] = useState<ScanAction | null>(null);
-  const [attachTarget, setAttachTarget] = useState<{ jobId: string; finding: Finding & { source: string } } | null>(null);
+  const [attachTarget, setAttachTarget] = useState<{ jobId: string; finding: ScanFinding } | null>(null);
   const [dialogIssue, setDialogIssue] = useState("");
   const [detail, setDetail] = useState<{ id: string; data: Assessment | null; error: string } | null>(null);
   const sidebar = useRef<HTMLElement>(null);
@@ -121,7 +176,10 @@ export default function Page() {
   const dialog = useRef<HTMLDialogElement>(null);
   const listRequest = useRef<AbortController | null>(null);
   const live = token.length > 0;
+  const sourceScanOpen = route.view === "source-scan";
+  const view = sourceScanOpen ? "scan-history" : route.view;
   const currentView = view === "endpoint-onboarding" && (!live || !canOnboard) ? "endpoints" : view;
+  const findingsOpen = currentView === "findings";
   const viewLabel = sections.find(section => section.id === currentView)?.label ??
     (currentView === "scan-history" ? "Scan history" : "Endpoint onboarding");
   const hostnames = new Map(endpoints.map(endpoint => [endpoint.id, endpoint.hostname]));
@@ -152,23 +210,29 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    if (!token || currentView !== "scan-history" || !selectedJobId || !hasResult) return;
+    if (!token || currentView !== "scan-history" || sourceScanOpen || !selectedJobId || !hasResult) return;
     const request = new AbortController();
     readAPI<Assessment>(`scan-jobs/${encodeURIComponent(selectedJobId)}/assessment`, token, request.signal)
       .then(data => { if (!request.signal.aborted) setDetail({ id: selectedJobId, data, error: "" }); })
       .catch(error => { if (!request.signal.aborted) setDetail({ id: selectedJobId, data: null, error: error.message }); });
     return () => request.abort();
-  }, [token, currentView, selectedJobId, hasResult, liveJobs]);
+  }, [token, currentView, sourceScanOpen, selectedJobId, hasResult, liveJobs]);
 
   useEffect(() => () => listRequest.current?.abort(), []);
 
   useEffect(() => {
     function syncView() {
-      const id = window.location.hash.slice(1);
+      const [id, query] = window.location.hash.slice(1).split("?", 2);
+      if (id === "scan-history" && query !== undefined) {
+        setNotice("");
+        setRoute(previous => ({ view: "source-scan", query,
+          keepFindings: previous.view === "findings" || (previous.view === "source-scan" && previous.keepFindings) }));
+        return;
+      }
       const target = sections.find(section => section.id === id);
-      if (target) setView(target.id);
-      else if (id === "scan-history" || id === "scan-detail") setView("scan-history");
-      else setView(id === "endpoint-onboarding" ? id : "dashboard");
+      if (target) setRoute({ view: target.id });
+      else if (id === "scan-history" || id === "scan-detail") setRoute({ view: "scan-history" });
+      else setRoute({ view: id === "endpoint-onboarding" ? id : "dashboard" });
     }
     syncView();
     window.addEventListener("hashchange", syncView);
@@ -241,6 +305,11 @@ export default function Page() {
     setNotice(action.kind === "cancel" ? `Scan #${shortId(job.id)} canceled.` : `Scan #${shortId(job.id)} · ${label(job.status)}`);
   }
 
+  function attachFinding(jobId: string, finding: ScanFinding) {
+    setNotice("");
+    setAttachTarget({ jobId, finding });
+  }
+
   const stats = [
     { name: "Total scans", count: jobs.length, icon: Layers3, tone: "ink", caption: live ? "Loaded scan jobs" : "Scans in preview" },
     { name: "Completed", count: jobs.filter(job => job.status === "completed").length, icon: Check, tone: "green", caption: "Full collection" },
@@ -271,7 +340,13 @@ export default function Page() {
           <Plug size={16} />{live ? "API connected" : "Connect API"}
         </button>
       </header>
-      {currentView === "endpoint-onboarding" ? <EndpointOnboarding token={token} /> : currentView !== "scan-history" ?
+      {(findingsOpen || (sourceScanOpen && route.keepFindings)) && <div hidden={!findingsOpen}>
+        <WorkspaceSection key={`findings-${live}`} section="findings" token={token} />
+      </div>}
+      {findingsOpen ? null : sourceScanOpen ?
+        <SourceScan key={`${route.query}-${live}`} target={parseScanFinding(route.query)} token={token} endpoints={endpoints} notice={notice}
+          attach={canManage ? attachFinding : undefined} /> :
+        currentView === "endpoint-onboarding" ? <EndpointOnboarding token={token} /> : currentView !== "scan-history" ?
         <WorkspaceSection key={`${currentView}-${live}`} section={currentView} token={token} /> : <main id="overview">
         <div className="heading"><div><h1>Scan history</h1><p>Review endpoint scans, findings, and collection coverage.</p></div>
           <div className="heading-actions">
@@ -310,7 +385,7 @@ export default function Page() {
           </section>
           <ScanDetail key={selectedJobId} job={selected} assessment={assessment}
             pending={Boolean(live && selectedJobId && hasResult && detail?.id !== selectedJobId)} error={detail?.id === selectedJobId ? detail?.error ?? "" : ""}
-            attach={live && canManage && selected ? finding => { setNotice(""); setAttachTarget({ jobId: selected.id, finding }); } : undefined}
+            attach={live && canManage && selected ? finding => attachFinding(selected.id, finding) : undefined}
             cancel={live && canManage && selected?.status === "queued" ? () => { setNotice(""); setScanAction({ kind: "cancel", job: selected }); } : undefined} />
         </div>
       </main>}
