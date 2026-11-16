@@ -69,6 +69,10 @@ jobs:
           $agent = Join-Path $extracted 'persistguard-agent.exe'
           $reportedVersion = & $agent --version
           if ($LASTEXITCODE -ne 0 -or $reportedVersion -cne $version) { throw 'Unexpected Windows release version.' }
+      - name: Verify Windows service upgrade and rollback
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/windows-service-update.ps1
 
   gateway:
     runs-on: ubuntu-26.04

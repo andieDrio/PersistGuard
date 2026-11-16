@@ -595,6 +595,39 @@ match its ID to the service log receipt. In **Scan history → Coverage**, check
 the Windows Services collector status and issue codes for that scan. An
 interactive collector run measures the access of the account running it.
 
+### Upgrade or roll back the Windows service
+
+Verify and extract the signed release package as described above. Run the update
+from elevated PowerShell during a maintenance window. The script reads the
+`PersistGuardAgent` executable path from the service configuration and verifies
+the staged executable's signer and timestamp before stopping the service. Keep
+the installation directory writable only by administrators.
+
+```powershell
+$update = ./agent/update-windows-service.ps1 -CandidatePath $extractedAgentExe `
+    -SigningCertificateThumbprint $signerThumbprint
+$update | Format-List
+```
+
+The script replaces the executable at its existing path and retains the previous
+binary at `BackupPath`. The service keeps its account, command line, startup
+settings, enrollment, and certificate files. A running service restarts. A
+stopped service stays stopped. If the replacement fails to reach `Running`, the
+script attempts to restore the previous binary and restart the service.
+
+After an upgrade, check the agent version at `ExecutablePath`, verify a fresh
+heartbeat in the dashboard, and queue a scan to confirm a new receipt. Keep the
+backup path until those checks pass. If a check fails, restore that version from
+the service's installation directory and repeat the heartbeat and scan checks.
+
+```powershell
+./agent/update-windows-service.ps1 -RollbackFrom $update.BackupPath
+```
+
+The Windows CI fixture exercises replacement and recovery on temporary files
+using a simulated service controller. Run a signed upgrade and rollback on an
+enrolled Windows staging endpoint before rollout.
+
 ### Operations workspace
 
 Apply `alembic upgrade head` from `backend` for the Cases, IOCs, and detection rules tables. Connect
