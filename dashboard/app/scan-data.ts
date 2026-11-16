@@ -33,19 +33,34 @@ export type Assessment = {
 };
 
 export type ScanFindingTarget = { jobId: string; source: string; artifactIndex: number };
+export type ScanLinkTarget = { jobId: string; finding?: ScanFindingTarget; scheduleId?: string };
+
+export function isUUID(value: string | null): value is string {
+  return value !== null && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(value);
+}
 
 export function sourceScanHref({ jobId, source, artifactIndex }: ScanFindingTarget) {
   return `#scan-history?${new URLSearchParams({ scan: jobId, source, artifact: String(artifactIndex) })}`;
 }
 
-export function parseScanFinding(query: string): ScanFindingTarget | null {
+export function scanScheduleHistoryHref(scheduleId: string) {
+  return `#scan-schedules?${new URLSearchParams({ history: scheduleId })}`;
+}
+
+export function scheduledScanHref(jobId: string, scheduleId: string) {
+  return `#scan-history?${new URLSearchParams({ scan: jobId, schedule: scheduleId })}`;
+}
+
+export function parseScanLink(query: string): ScanLinkTarget | null {
   const params = new URLSearchParams(query);
   const jobId = params.get("scan");
+  if (!isUUID(jobId)) return null;
+  const scheduleId = params.get("schedule");
+  if (scheduleId !== null) return isUUID(scheduleId) ? { jobId, scheduleId: scheduleId.toLowerCase() } : null;
   const source = params.get("source");
   const artifact = params.get("artifact");
-  if (!jobId || !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(jobId) ||
-      !source || !artifact || !/^\d+$/.test(artifact) || !Number.isSafeInteger(Number(artifact))) return null;
-  return { jobId, source, artifactIndex: Number(artifact) };
+  if (!source || !artifact || !/^\d+$/.test(artifact) || !Number.isSafeInteger(Number(artifact))) return null;
+  return { jobId, finding: { jobId, source, artifactIndex: Number(artifact) } };
 }
 
 export const sourceNames: Record<string, string> = {

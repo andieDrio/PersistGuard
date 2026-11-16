@@ -21,10 +21,16 @@ const restoredRules = new Map();
 const queuedScans = new Map();
 const scanSchedules = new Map();
 const fixtureScheduleId = "0a27d2c2-e7ea-40d1-bbe1-a1b047bf36a4";
+const fixtureSchedule = { id: fixtureScheduleId, endpoint_id: endpoint.id, hostname: endpoint.hostname,
+  scan_type: "persistence_services_scan", frequency: "weekly", enabled: true, next_run_at: "2038-02-08T01:30:00Z",
+  last_run_at: "2026-11-17T01:30:00Z", last_outcome: "skipped_busy" };
 const sourceScan = {
   id: "9d0be757-f8b9-4cbe-856e-dff4ba0c4e95", endpoint_id: endpoint.id,
   status: "partial", scan_type: "persistence_full_scan", created_at: "2025-12-01T00:00:00Z",
 };
+const scheduledScan = { ...sourceScan, id: "5b746050-eb06-414b-8cd0-2ab6bfda1b63", scan_type: fixtureSchedule.scan_type,
+  schedule_id: fixtureScheduleId, created_at: "2026-11-10T01:30:09Z" };
+const runningScan = { ...scheduledScan, id: "a44dee07-13cf-4f76-ad6f-ff1ceca374f8", status: "running" };
 const serviceFinding = {
   artifact_index: 0, reasons: ["Fixture service finding"], path: "HKLM\\SYSTEM\\CurrentControlSet\\Services\\SampleAgent",
   severity: "high", score: 70, fingerprint: "a".repeat(64), attack_technique: "T1543.003",
@@ -67,11 +73,24 @@ createServer(async (request, response) => {
     switch (pathname) {
       case "/api/scan-jobs": return send(200, queuedScans.get(authorization) ?? []);
       case "/api/scan-schedules": return send(200, { has_more: false, schedules: scanSchedules.has(authorization) ?
-        [scanSchedules.get(authorization)] : role === "viewer" ? [{ id: fixtureScheduleId, endpoint_id: endpoint.id,
-          hostname: endpoint.hostname, scan_type: "persistence_services_scan", frequency: "weekly", enabled: true,
-          next_run_at: "2038-02-08T01:30:00Z", last_run_at: "2026-11-17T01:30:00Z", last_outcome: "skipped_busy" }] : [] });
+        [scanSchedules.get(authorization)] : role === "viewer" ? [fixtureSchedule] : [] });
+      case `/api/scan-schedules/${fixtureScheduleId}/runs`: {
+        const schedule = scanSchedules.get(authorization) ?? (role === "viewer" ? fixtureSchedule : null);
+        if (!schedule) return send(404, { detail: "Scan schedule not found" });
+        return send(200, { schedule, has_more: false, runs: role === "viewer" ? [
+          { id: "989e90ac-39f2-4c71-b63a-945506e74fe3", scheduled_for: "2026-11-17T01:30:00Z",
+            attempted_at: "2026-11-17T01:30:04Z", outcome: "skipped_busy", job_id: null, job_status: null },
+          { id: scheduledScan.id, scheduled_for: null, attempted_at: scheduledScan.created_at,
+            outcome: "queued", job_id: scheduledScan.id, job_status: scheduledScan.status },
+          { id: runningScan.id, scheduled_for: "2026-11-03T01:30:00Z", attempted_at: "2026-11-03T01:30:14Z",
+            outcome: "queued", job_id: runningScan.id, job_status: runningScan.status },
+        ] : [] });
+      }
       case `/api/scan-jobs/${sourceScan.id}`: return send(200, sourceScan);
-      case `/api/scan-jobs/${sourceScan.id}/assessment`: return send(200, {
+      case `/api/scan-jobs/${scheduledScan.id}`: return send(200, scheduledScan);
+      case `/api/scan-jobs/${runningScan.id}`: return send(200, runningScan);
+      case `/api/scan-jobs/${sourceScan.id}/assessment`:
+      case `/api/scan-jobs/${scheduledScan.id}/assessment`: return send(200, {
         status: "partial", baseline_job_id: null, collectors: {
           services: { status: "collected", coverage: [], assessments: [serviceFinding] },
           scheduled_tasks: { status: "partial", coverage: [{ error: "fixture_coverage_gap" }], assessments: [taskFinding] },

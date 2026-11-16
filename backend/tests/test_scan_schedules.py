@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from persistguard.api import app
 from persistguard.auth import AuthenticatedUser, database_session, linked_account
-from persistguard.models import AuditEvent, Endpoint, Organization, ScanJob, ScanSchedule, User
+from persistguard.models import AuditEvent, Endpoint, Organization, ScanJob, ScanSchedule, ScanScheduleRun, User
 from persistguard.scan_schedules import process_due_schedules
 
 
@@ -59,7 +59,7 @@ class ScanScheduleTests(unittest.TestCase):
 
     def clean_records(self):
         with Session(self.engine) as session, session.begin():
-            for model in (AuditEvent, ScanJob, ScanSchedule, Endpoint, User):
+            for model in (AuditEvent, ScanScheduleRun, ScanJob, ScanSchedule, Endpoint, User):
                 session.execute(delete(model).where(model.organization_id.in_((self.org, self.other_org))))
             session.execute(delete(Organization).where(Organization.id.in_((self.org, self.other_org))))
 
@@ -84,13 +84,17 @@ class ScanScheduleTests(unittest.TestCase):
         self.assertEqual(self.client.post(route, json=self.payload | {"next_run_at": "2030-01-01T00:00:00"}).status_code, 422)
         created = self.create_schedule()
         schedule_route = f"{route}/{created['id']}"
+        runs_route = f"{schedule_route}/runs"
+        self.assertEqual(self.client.get(runs_route).json(), {"schedule": created, "runs": [], "has_more": False})
         self.assertEqual(self.client.post(route, json=self.payload).status_code, 409)
 
         self.set_actor(self.other_admin, "admin", self.other_org)
         self.assertEqual(self.client.get(route).json()["schedules"], [])
         self.assertEqual(self.client.patch(schedule_route, json={"enabled": False}).status_code, 404)
+        self.assertEqual(self.client.get(runs_route).status_code, 404)
         self.set_actor(self.viewer, "viewer")
         self.assertEqual(self.client.get(route).json()["schedules"], [created])
+        self.assertEqual(self.client.get(runs_route).status_code, 200)
         self.assertEqual(self.client.post(route, json=self.payload).status_code, 403)
         self.assertEqual(self.client.patch(schedule_route, json={"enabled": False}).status_code, 403)
 
@@ -121,6 +125,11 @@ class ScanScheduleTests(unittest.TestCase):
         job, = self.client.get("/api/scan-jobs").json()
         self.assertEqual((job["status"], job["scan_type"], job["schedule_id"]),
                          ("queued", "persistence_services_scan", schedule_id))
+        history = f"/api/scan-schedules/{schedule_id}/runs"
+        run, = self.client.get(history).json()["runs"]
+        self.assertEqual((run["job_id"], run["job_status"], run["outcome"]), (job["id"], "queued", "queued"))
+        self.assertEqual(datetime.fromisoformat(run["scheduled_for"]), overdue)
+        self.assertGreaterEqual(datetime.fromisoformat(run["attempted_at"]), overdue)
         schedule, = self.client.get("/api/scan-schedules").json()["schedules"]
         self.assertEqual(schedule["last_outcome"], "queued")
         self.assertEqual(datetime.fromisoformat(schedule["next_run_at"]), overdue + timedelta(days=4))
@@ -150,6 +159,18 @@ class ScanScheduleTests(unittest.TestCase):
         schedule, = self.client.get("/api/scan-schedules").json()["schedules"]
         self.assertEqual((schedule["enabled"], schedule["last_outcome"]), (False, "paused_endpoint"))
         self.assertEqual(self.client.patch(route, json={"enabled": True}).status_code, 409)
+
+        self.set_actor(self.viewer, "viewer")
+        first = self.client.get(history, params={"limit": 2}).json()
+        self.assertTrue(first["has_more"])
+        self.assertEqual([row["outcome"] for row in first["runs"]], ["paused_endpoint", "paused_owner"])
+        second = self.client.get(history, params={"limit": 2, "offset": 2}).json()
+        self.assertFalse(second["has_more"])
+        skipped, queued = second["runs"]
+        self.assertEqual((skipped["outcome"], skipped["job_id"], skipped["job_status"]), ("skipped_busy", None, None))
+        self.assertEqual((queued["id"], queued["outcome"], queued["job_status"]), (run["id"], "queued", "canceled"))
+        self.set_actor(self.other_admin, "admin", self.other_org)
+        self.assertEqual(self.client.get(history).status_code, 404)
 
     def test_api_startup_processes_persisted_due_schedule(self):
         schedule_id = self.create_schedule()["id"]

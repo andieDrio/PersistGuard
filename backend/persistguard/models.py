@@ -274,6 +274,27 @@ class ScanJob(Base):
     )
 
 
+class ScanScheduleRun(Base):
+    __tablename__ = "scan_schedule_runs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column()
+    schedule_id: Mapped[UUID] = mapped_column()
+    job_id: Mapped[UUID | None] = mapped_column()
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[str] = mapped_column(Text)
+
+    __table_args__ = (
+        ForeignKeyConstraint(["schedule_id", "organization_id"], ["scan_schedules.id", "scan_schedules.organization_id"]),
+        ForeignKeyConstraint(["job_id", "organization_id"], ["scan_jobs.id", "scan_jobs.organization_id"]),
+        UniqueConstraint("job_id", name="uq_scan_schedule_runs_job"),
+        CheckConstraint("outcome IN ('queued', 'skipped_busy', 'paused_endpoint', 'paused_owner') "
+                        "AND (outcome = 'queued') = (job_id IS NOT NULL)", name="ck_scan_schedule_runs_outcome"),
+        Index("ix_scan_schedule_runs_history", schedule_id, attempted_at, id),
+    )
+
+
 class CaseFinding(Base):
     __tablename__ = "case_findings"
 

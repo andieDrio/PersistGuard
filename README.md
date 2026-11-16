@@ -296,6 +296,14 @@ at most once per schedule and advance to the next future occurrence. An ineligib
 endpoint or loss of the schedule owner's access pauses the schedule at its next
 attempt. Pausing a schedule leaves jobs already in Scan history in the queue.
 
+Stop the previous FastAPI backend before applying migration
+`0018_scan_schedule_runs` so its final scheduler writes are included in the
+backfill. Start the updated backend, then open **Run history** on a schedule to
+see processed occurrences, including skips and automatic pauses.
+Queued runs link to the exact scan and show its current status. The migration
+recovers earlier scheduled jobs and the latest recorded skip or automatic pause.
+The planned time is blank for recovered entries because it was not stored.
+
 ### List or cancel queued scans
 
 Linked users can list scans in their organization. The list supports `status`,

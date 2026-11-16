@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from persistguard.audit import commit_audit_event
 from persistguard.auth import AuthenticatedUser, database_session, identity_engine, linked_account, local_identity
-from persistguard.models import AuditEvent, Endpoint, Organization, ScanJob, ScanSchedule, User
+from persistguard.models import AuditEvent, Endpoint, Organization, ScanJob, ScanSchedule, ScanScheduleRun, User
 from persistguard.scan_queue import ScanRequest, eligible_scan_endpoint, lock_scan_endpoint, open_scan_job
 
 
@@ -60,9 +60,32 @@ class SchedulePage:
     has_more: bool
 
 
+@dataclass(frozen=True)
+class ScheduleRunSummary:
+    id: UUID
+    scheduled_for: datetime | None
+    attempted_at: datetime
+    outcome: str
+    job_id: UUID | None
+    job_status: str | None
+
+
+@dataclass(frozen=True)
+class ScheduleRunPage:
+    schedule: ScheduleSummary
+    runs: list[ScheduleRunSummary]
+    has_more: bool
+
+
 def summarize(schedule: ScanSchedule, hostname: str) -> ScheduleSummary:
     return ScheduleSummary(schedule.id, schedule.endpoint_id, hostname, schedule.scan_type, schedule.frequency,
                            schedule.enabled, schedule.next_run_at, schedule.last_run_at, schedule.last_outcome)
+
+
+def tenant_schedules(organization_id: UUID):
+    return select(ScanSchedule, Endpoint.hostname).join(
+        Endpoint, (Endpoint.id == ScanSchedule.endpoint_id) & (Endpoint.organization_id == ScanSchedule.organization_id),
+    ).where(ScanSchedule.organization_id == organization_id)
 
 
 def require_manager(session: Session, user: AuthenticatedUser, action: str) -> None:
@@ -92,14 +115,38 @@ def list_schedules(
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0, le=2_147_483_647)] = 0,
 ) -> SchedulePage:
-    statement = select(ScanSchedule, Endpoint.hostname).join(
-        Endpoint, (Endpoint.id == ScanSchedule.endpoint_id) & (Endpoint.organization_id == ScanSchedule.organization_id),
-    ).where(ScanSchedule.organization_id == user.organization_id).order_by(
+    statement = tenant_schedules(user.organization_id).order_by(
         Endpoint.hostname, ScanSchedule.scan_type, ScanSchedule.id,
     ).limit(limit + 1).offset(offset)
     rows = session.execute(statement).all()
     response.headers["Cache-Control"] = "no-store"
     return SchedulePage([summarize(schedule, hostname) for schedule, hostname in rows[:limit]], len(rows) > limit)
+
+
+@router.get("/{schedule_id}/runs")
+def list_schedule_runs(
+    schedule_id: UUID,
+    user: Annotated[AuthenticatedUser, Depends(local_identity)],
+    session: Annotated[Session, Depends(database_session)],
+    response: Response,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    offset: Annotated[int, Query(ge=0, le=2_147_483_647)] = 0,
+) -> ScheduleRunPage:
+    target = session.execute(tenant_schedules(user.organization_id).where(ScanSchedule.id == schedule_id)).one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Scan schedule not found")
+    statement = select(ScanScheduleRun, ScanJob.id, ScanJob.status).outerjoin(ScanJob, (
+        (ScanJob.id == ScanScheduleRun.job_id) & (ScanJob.organization_id == ScanScheduleRun.organization_id) &
+        (ScanJob.schedule_id == ScanScheduleRun.schedule_id)
+    )).where(
+        ScanScheduleRun.schedule_id == schedule_id, ScanScheduleRun.organization_id == user.organization_id,
+    ).order_by(ScanScheduleRun.attempted_at.desc(), ScanScheduleRun.id.desc()).limit(limit + 1).offset(offset)
+    rows = session.execute(statement).all()
+    response.headers["Cache-Control"] = "no-store"
+    return ScheduleRunPage(summarize(*target), [
+        ScheduleRunSummary(run.id, run.scheduled_for, run.attempted_at, run.outcome, job_id, status)
+        for run, job_id, status in rows[:limit]
+    ], len(rows) > limit)
 
 
 @router.post("", status_code=201)
@@ -181,8 +228,10 @@ def process_due_schedules(engine: Engine, limit: int = 25) -> None:
                 User.role.in_(MANAGERS), User.identity_subject.is_not(None), Organization.status == "active",
             ).with_for_update(read=True, of=(User, Organization)))
             now = session.scalar(select(func.statement_timestamp()))
+            scheduled_for = schedule.next_run_at
+            job_id = None
             schedule.last_run_at = now
-            schedule.next_run_at = next_occurrence(schedule.next_run_at, schedule.frequency, now)
+            schedule.next_run_at = next_occurrence(scheduled_for, schedule.frequency, now)
             if owner is None:
                 schedule.enabled = False
                 schedule.last_outcome = "paused_owner"
@@ -196,9 +245,13 @@ def process_due_schedules(engine: Engine, limit: int = 25) -> None:
                               requested_by=owner, scan_type=schedule.scan_type, schedule_id=schedule.id)
                 session.add(job)
                 session.flush()
+                job_id = job.id
                 session.add(AuditEvent(organization_id=schedule.organization_id, actor_id=owner,
                                        action="scan_jobs.schedule", status_code=201, target_id=job.id))
                 schedule.last_outcome = "queued"
+            session.add(ScanScheduleRun(organization_id=schedule.organization_id, schedule_id=schedule.id,
+                                        job_id=job_id, scheduled_for=scheduled_for, attempted_at=now,
+                                        outcome=schedule.last_outcome))
 
 
 async def run_scheduler(database_url: str, stop: asyncio.Event) -> None:

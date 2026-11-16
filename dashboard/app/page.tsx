@@ -10,9 +10,9 @@ import { readAPI } from "./api";
 import { AttachFindingDialog } from "./case-findings";
 import { EndpointOnboarding } from "./endpoint-onboarding";
 import { ScanControlDialog, type ScanAction, type ScanTarget, type ScanTargets } from "./scan-controls";
-import { ScanSchedules } from "./scan-schedules";
-import { activeStatuses, parseScanFinding, previewAssessment, previewJobs, scanTypeLabel, sourceNames, terminalStatuses,
-  type Assessment, type Finding, type Job, type ScanFindingTarget } from "./scan-data";
+import { ScanScheduleHistory, ScanSchedules } from "./scan-schedules";
+import { activeStatuses, parseScanLink, previewAssessment, previewJobs, scanScheduleHistoryHref, scanTypeLabel, sourceNames, terminalStatuses,
+  type Assessment, type Finding, type Job, type ScanFindingTarget, type ScanLinkTarget } from "./scan-data";
 import { sections, WorkspaceSection } from "./workspace";
 
 const pageSize = 7;
@@ -23,7 +23,8 @@ const shortId = (id: string) => id.slice(0, 8);
 const label = (value: string) => value.replaceAll("_", " ").replace(/^./, first => first.toUpperCase());
 const findingSeverities = ["critical", "high", "medium", "low", "info"];
 type View = typeof sections[number]["id"] | "scan-history" | "scan-schedules" | "endpoint-onboarding";
-type Route = { view: View } | { view: "source-scan"; query: string; keepFindings: boolean };
+type Route = { view: View } | { view: "source-scan"; query: string; keepFindings: boolean } |
+  { view: "schedule-history"; scheduleId: string | null };
 type ScanFinding = Finding & { source: string };
 
 function Badge({ status }: { status: string }) {
@@ -111,13 +112,14 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach, target }:
 }
 
 function SourceScan({ target, token, endpoints, notice, attach }: {
-  target: ScanFindingTarget | null; token: string; endpoints: ScanTarget[]; notice: string;
+  target: ScanLinkTarget | null; token: string; endpoints: ScanTarget[]; notice: string;
   attach?: (jobId: string, finding: ScanFinding) => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const [loaded, setLoaded] = useState<{ job: Job; assessment: Assessment | null; error: string }>();
   const [issue, setIssue] = useState("");
   const jobId = target?.jobId;
+  const scheduleId = target?.scheduleId;
 
   useEffect(() => {
     heading.current?.closest(".app-scroll")?.scrollTo({ top: 0 });
@@ -128,28 +130,36 @@ function SourceScan({ target, token, endpoints, notice, attach }: {
     if (!token || !jobId) return;
     const request = new AbortController();
     const path = `scan-jobs/${encodeURIComponent(jobId)}`;
-    void Promise.allSettled([
-      readAPI<Job>(path, token, request.signal),
-      readAPI<Assessment>(`${path}/assessment`, token, request.signal),
-    ]).then(([job, assessment]) => {
-      if (request.signal.aborted) return;
-      if (job.status === "rejected") { setIssue(job.reason.message); return; }
-      setLoaded({ job: job.value, assessment: assessment.status === "fulfilled" ? assessment.value : null,
-        error: assessment.status === "rejected" ? assessment.reason.message : "" });
-    });
+    async function load() {
+      try {
+        const job = await readAPI<Job>(path, token, request.signal);
+        if (scheduleId && job.schedule_id !== scheduleId) throw new Error("This scan is unavailable for this schedule.");
+        if (request.signal.aborted) return;
+        const result = { job, assessment: null as Assessment | null, error: "" };
+        if (terminalStatuses.includes(job.status)) {
+          try { result.assessment = await readAPI<Assessment>(`${path}/assessment`, token, request.signal); }
+          catch (cause) { result.error = cause instanceof Error ? cause.message : "The scan assessment is unavailable."; }
+        }
+        if (!request.signal.aborted) setLoaded(result);
+      } catch (cause) {
+        if (!request.signal.aborted) setIssue(cause instanceof Error ? cause.message : "The source scan is unavailable.");
+      }
+    }
+    void load();
     return () => request.abort();
-  }, [jobId, token]);
+  }, [jobId, scheduleId, token]);
 
   const job = loaded && { ...loaded.job, endpointLabel: endpoints.find(endpoint => endpoint.id === loaded.job.endpoint_id)?.hostname };
   return <main className="source-scan">
     <div className="heading"><h1 ref={heading} tabIndex={-1}>Source scan</h1>
-      <a className="button" href="#findings"><ArrowLeft size={15} />Back to Findings</a></div>
+      <a className="button" href={scheduleId ? scanScheduleHistoryHref(scheduleId) : "#findings"}>
+        <ArrowLeft size={15} />{scheduleId ? "Back to run history" : "Back to Findings"}</a></div>
     {notice && <p className="action-notice" role="status"><Check size={16} />{notice}</p>}
     {!target ? <p className="api-error" role="alert">This source scan link is invalid.</p> :
       !token ? <p className="panel section-note">Connect the API to open this source scan.</p> :
       issue ? <p className="api-error" role="alert">{issue}</p> :
       !loaded || !job ? <p className="panel section-note" role="status">Loading source scan…</p> :
-      <ScanDetail job={job} target={target} assessment={loaded.assessment} pending={false} error={loaded.error}
+      <ScanDetail job={job} target={target.finding} assessment={loaded.assessment} pending={false} error={loaded.error}
         attach={attach ? finding => attach(job.id, finding) : undefined} />}
   </main>;
 }
@@ -179,7 +189,8 @@ export default function Page() {
   const listRequest = useRef<AbortController | null>(null);
   const live = token.length > 0;
   const sourceScanOpen = route.view === "source-scan";
-  const view = sourceScanOpen ? "scan-history" : route.view;
+  const scheduleHistoryOpen = route.view === "schedule-history";
+  const view = sourceScanOpen ? "scan-history" : scheduleHistoryOpen ? "scan-schedules" : route.view;
   const currentView = view === "endpoint-onboarding" && (!live || !canOnboard) ? "endpoints" : view;
   const findingsOpen = currentView === "findings";
   const viewLabel = sections.find(section => section.id === currentView)?.label ??
@@ -229,6 +240,10 @@ export default function Page() {
         setNotice("");
         setRoute(previous => ({ view: "source-scan", query,
           keepFindings: previous.view === "findings" || (previous.view === "source-scan" && previous.keepFindings) }));
+        return;
+      }
+      if (id === "scan-schedules" && query !== undefined) {
+        setRoute({ view: "schedule-history", scheduleId: new URLSearchParams(query).get("history") });
         return;
       }
       const target = sections.find(section => section.id === id);
@@ -347,8 +362,9 @@ export default function Page() {
         <WorkspaceSection key={`findings-${live}`} section="findings" token={token} />
       </div>}
       {findingsOpen ? null : sourceScanOpen ?
-        <SourceScan key={`${route.query}-${live}`} target={parseScanFinding(route.query)} token={token} endpoints={endpoints} notice={notice}
+        <SourceScan key={`${route.query}-${live}`} target={parseScanLink(route.query)} token={token} endpoints={endpoints} notice={notice}
           attach={canManage ? attachFinding : undefined} /> :
+        scheduleHistoryOpen ? <ScanScheduleHistory key={`${route.scheduleId}-${live}`} token={token} scheduleId={route.scheduleId} /> :
         currentView === "scan-schedules" ? <ScanSchedules key={`scan-schedules-${live}`} token={token} canManage={canManage} /> :
         currentView === "endpoint-onboarding" ? <EndpointOnboarding token={token} /> : currentView !== "scan-history" ?
         <WorkspaceSection key={`${currentView}-${live}`} section={currentView} token={token} /> : <main id="overview">
