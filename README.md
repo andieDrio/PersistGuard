@@ -524,9 +524,40 @@ Use a linked user access token to read the report in the same organization.
 Invoke-RestMethod "http://127.0.0.1:8000/api/scan-jobs/$($job.id)/result" -Headers $headers
 ```
 
+### Build a Windows release package
+
+From the repository root on Windows with Go installed, build an x64 test ZIP.
+The output directory and archive name include the version and the `-unsigned`
+suffix. The Windows CI job checks the archive checksum and runs `--version`
+from the extracted executable.
+
+```powershell
+$releaseOutput = Join-Path $env:TEMP 'PersistGuard releases'
+./agent/build-windows-release.ps1 -Version v0.0.0-test -OutputDirectory $releaseOutput -Unsigned
+```
+
+For a rollout package, run from Visual Studio Developer PowerShell with
+Windows SDK SignTool on `PATH`. Use the thumbprint of the organization's code-signing certificate
+with its private key available in `Cert:\CurrentUser\My`, and use the signing
+provider's RFC 3161 timestamp URL. The script writes the ZIP and `SHA256SUMS.txt`
+after the executable passes signature and timestamp verification.
+[Microsoft SignTool documentation](https://learn.microsoft.com/windows/win32/seccrypto/signtool)
+
+```powershell
+./agent/build-windows-release.ps1 -Version $version -OutputDirectory $releaseOutput `
+    -SigningCertificateThumbprint $signerThumbprint -TimestampUrl $timestampUrl
+```
+
+On the endpoint, compare `Get-FileHash -Algorithm SHA256` for the ZIP with
+`SHA256SUMS.txt` from the release. Extract the ZIP, then check the executable
+with `Get-AuthenticodeSignature`. Require `Valid` status, a timestamp, and a
+signer thumbprint that matches the one supplied by the release owner. Run
+`persistguard-agent.exe --version` to confirm the version before installing.
+
 ### Run watch mode as a Windows service
 
-Build `persistguard-agent.exe` from `agent` with `go build -o persistguard-agent.exe .`.
+For rollout, use `persistguard-agent.exe` from the signed release package.
+For local development, build it from `agent` with `go build -o persistguard-agent.exe .`.
 Place the executable in a directory writable only by administrators. In an
 elevated PowerShell session, set `$agentExe`, `$deviceKey`, `$clientCert`, and
 `$serverCA` to the absolute paths for this installation. Set `$gatewayURL` to
