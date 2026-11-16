@@ -19,6 +19,21 @@ const versions = [2, 1].map(version => ({
 }));
 const restoredRules = new Map();
 const queuedScans = new Map();
+const sourceScan = {
+  id: "9d0be757-f8b9-4cbe-856e-dff4ba0c4e95", endpoint_id: endpoint.id,
+  status: "partial", scan_type: "persistence_full_scan", created_at: "2025-12-01T00:00:00Z",
+};
+const serviceFinding = {
+  artifact_index: 0, reasons: ["Fixture service finding"], path: "HKLM\\SYSTEM\\CurrentControlSet\\Services\\SampleAgent",
+  severity: "high", score: 70, fingerprint: "a".repeat(64), attack_technique: "T1543.003",
+};
+const taskFinding = {
+  artifact_index: 0, reasons: ["Fixture task finding"], path: "\\Maintenance\\Inventory",
+  severity: "medium", score: 50, fingerprint: "b".repeat(64),
+};
+const findings = [["services", serviceFinding], ["scheduled_tasks", taskFinding]].map(([source, finding]) => ({
+  ...finding, source, scan_job_id: sourceScan.id, scan_created_at: sourceScan.created_at, hostname: endpoint.hostname,
+}));
 
 async function readJSON(request) {
   try {
@@ -49,6 +64,23 @@ createServer(async (request, response) => {
   if (request.method === "GET") {
     switch (pathname) {
       case "/api/scan-jobs": return send(200, queuedScans.get(authorization) ?? []);
+      case `/api/scan-jobs/${sourceScan.id}`: return send(200, sourceScan);
+      case `/api/scan-jobs/${sourceScan.id}/assessment`: return send(200, {
+        status: "partial", baseline_job_id: null, collectors: {
+          services: { status: "collected", coverage: [], assessments: [serviceFinding] },
+          scheduled_tasks: { status: "partial", coverage: [{ error: "fixture_coverage_gap" }], assessments: [taskFinding] },
+        },
+      });
+      case "/api/findings": {
+        const query = (searchParams.get("query") ?? "").toLowerCase();
+        const severity = searchParams.get("severity");
+        const matches = findings.filter(finding => finding.reasons[0].toLowerCase().includes(query));
+        const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+        for (const finding of matches) counts[finding.severity]++;
+        const rows = severity ? matches.filter(finding => finding.severity === severity) : matches;
+        return send(200, { counts, findings: rows, total: rows.length, can_manage: role !== "viewer",
+          scan_count: 1, scan_batch_size: 5, has_older_scans: false, page_size: 25 });
+      }
       case "/api/scan-targets": return send(200, { can_manage: role !== "viewer", can_onboard: isAdmin,
         endpoints: [{ id: endpoint.id, hostname: endpoint.hostname }] });
       case "/api/workspace": return send(200, {

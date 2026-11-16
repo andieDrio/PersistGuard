@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Search, ShieldAlert } from "lucide-react";
 import { readAPI } from "./api";
 import { AttachFindingDialog } from "./case-findings";
-import { sourceNames, type Finding } from "./scan-data";
+import { sourceNames, sourceScanHref, type Finding } from "./scan-data";
 
 const severities = ["critical", "high", "medium", "low", "info"] as const;
 type Severity = typeof severities[number];
@@ -75,7 +75,10 @@ export function FindingsWorkspace({ token }: { token: string }) {
           <tbody>{data.findings.map(row => <tr key={`${row.scan_job_id}-${row.source}-${row.artifact_index}`}>
             <td className="table-finding"><strong>{row.reasons.join(" · ")}</strong><small>{sourceNames[row.source] ?? row.source} · {row.path}</small></td>
             <td><span className={`severity ${row.severity}`}>{title(row.severity)}</span> <span className="mono">{row.score}</span></td>
-            <td>{row.hostname}</td><td><span className="mono" title={row.scan_job_id}>#{row.scan_job_id.slice(0, 8)}</span><small>{date.format(new Date(row.scan_created_at))}</small></td>
+            <td>{row.hostname}</td><td><a className="source-scan-link mono"
+              href={sourceScanHref({ jobId: row.scan_job_id, source: row.source, artifactIndex: row.artifact_index })}
+              aria-label={`Open source scan #${row.scan_job_id.slice(0, 8)} for ${row.reasons.join(" · ")}`} title={row.scan_job_id}>
+              #{row.scan_job_id.slice(0, 8)}</a><small>{date.format(new Date(row.scan_created_at))}</small></td>
             <td className="mono">{row.attack_technique ?? "—"}</td><td>{data.can_manage && row.fingerprint &&
               <button className="button" type="button" onClick={() => { setNotice(""); setAttachment(row); }}>Attach to case</button>}</td>
           </tr>)}</tbody></table></div>

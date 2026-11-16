@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
 
-export async function connect(page: Page, role: "admin" | "analyst" | "viewer") {
+export async function connect(page: Page, role: "admin" | "analyst" | "viewer", path = "/") {
   const token = `dashboard-${role}-${randomUUID()}`;
-  await page.goto("/");
+  await page.goto(path);
   await page.getByRole("button", { name: "Connect API", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Access token").fill(token);

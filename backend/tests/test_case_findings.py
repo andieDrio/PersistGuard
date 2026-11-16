@@ -57,7 +57,11 @@ class CaseFindingTests(unittest.TestCase):
             try:
                 with TestClient(app) as client:
                     path = f"/api/workspace/cases/{case_id}/findings"
-                    assessment_url = f"/api/scan-jobs/{job_id}/assessment"
+                    job_url = f"/api/scan-jobs/{job_id}"
+                    assessment_url = f"{job_url}/assessment"
+                    self.assertEqual(client.get(job_url).json()["id"], str(job_id))
+                    for suffix in ("", "/assessment"):
+                        self.assertEqual(client.get(f"/api/scan-jobs/{other_job}{suffix}").status_code, 404)
                     findings = client.get(assessment_url).json()["collectors"]["services"]["assessments"]
                     self.assertNotIn("fingerprint", findings[1])
                     payload = {"scan_job_id": str(job_id), "source": "services", "artifact_index": 0,
@@ -99,6 +103,8 @@ class CaseFindingTests(unittest.TestCase):
                     self.assertEqual((retry.status_code, retry.json()), (200, saved))
                     actor = AuthenticatedUser("fixture", analyst.user_id, analyst.organization_id, "viewer", True)
                     self.assertFalse(client.get("/api/findings").json()["can_manage"])
+                    self.assertEqual(client.get(job_url).status_code, 200)
+                    self.assertEqual(client.get(assessment_url).status_code, 200)
                     self.assertEqual(client.get(path).json(), [saved])
                     self.assertEqual(client.post(path, json=payload).status_code, 403)
                     with Session(connection, join_transaction_mode="create_savepoint") as session:

@@ -185,6 +185,9 @@ tbody tr:hover { background: #f5f9f6; }
 .severity-card { text-align: left; color: var(--ink); }
 .severity-card[aria-pressed="true"] { border-color: #56896a; background: #f1f8f1; }
 .table-finding { width: 43%; padding-block: 10px; overflow-wrap: anywhere; }
+.source-scan-link { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+.source-scan > .detail { max-width: 720px; }
+.source-scan .finding p { white-space: normal; overflow-wrap: anywhere; }
 .finding, .coverage-item { padding: 10px; border-radius: 8px; background: #f8faf8; border: 1px solid #e8eee9; min-width: 0; }
 .finding-line, .coverage-item > div { display: flex; justify-content: space-between; align-items: center; gap: 7px; }
 .severity { border-radius: 4px; padding: 3px 5px; font-size: 9px; font-weight: 700; background: #e7eff6; color: #2c5b7a; }

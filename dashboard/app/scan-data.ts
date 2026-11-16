@@ -31,6 +31,22 @@ export type Assessment = {
   collectors: Record<string, Collector>;
 };
 
+export type ScanFindingTarget = { jobId: string; source: string; artifactIndex: number };
+
+export function sourceScanHref({ jobId, source, artifactIndex }: ScanFindingTarget) {
+  return `#scan-history?${new URLSearchParams({ scan: jobId, source, artifact: String(artifactIndex) })}`;
+}
+
+export function parseScanFinding(query: string): ScanFindingTarget | null {
+  const params = new URLSearchParams(query);
+  const jobId = params.get("scan");
+  const source = params.get("source");
+  const artifact = params.get("artifact");
+  if (!jobId || !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(jobId) ||
+      !source || !artifact || !/^\d+$/.test(artifact) || !Number.isSafeInteger(Number(artifact))) return null;
+  return { jobId, source, artifactIndex: Number(artifact) };
+}
+
 export const sourceNames: Record<string, string> = {
   registry: "Registry",
   scheduled_tasks: "Scheduled Tasks",
