@@ -59,3 +59,50 @@ func TestServiceStartTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceInventoryRestrictedServicePreservesPartialCoverage(t *testing.T) {
+    report := serviceInventory{Entries: []serviceEntry{
+        {Name: "Readable", State: "running"},
+        {Name: "McmSvc", State: "stopped"},
+    }}
+    report.Coverage.Status = "collected"
+    err := collectServiceConfigs(context.Background(), &report, func(entry *serviceEntry) error {
+        if entry.Name == "McmSvc" {
+            return windows.ERROR_ACCESS_DENIED
+        }
+        entry.Command = `C:\\Windows\\System32\\svchost.exe`
+        entry.StartType = "automatic"
+        return nil
+    })
+    if err != nil {
+        t.Fatal(err)
+    }
+    if report.Coverage.Status != "partial" {
+        t.Fatalf("restricted service must retain partial coverage, got %q", report.Coverage.Status)
+    }
+    if len(report.Coverage.Issues) != 1 || report.Coverage.Issues[0] != (serviceIssue{
+        Name: "McmSvc", Operation: "query_config", Code: "access_denied",
+    }) {
+        t.Fatalf("unexpected coverage diagnostics: %+v", report.Coverage.Issues)
+    }
+    if len(report.Entries) != 2 || report.Entries[1].Name != "McmSvc" ||
+        report.Entries[1].State != "stopped" || report.Entries[1].StartType != "" ||
+        report.Entries[0].StartType != "automatic" {
+        t.Fatalf("collector must preserve both readable and restricted entries: %+v", report.Entries)
+    }
+}
+
+func TestServiceInventoryAllConfigsReadable(t *testing.T) {
+    report := serviceInventory{Entries: []serviceEntry{{Name: "Readable"}}}
+    report.Coverage.Status = "collected"
+    err := collectServiceConfigs(context.Background(), &report, func(entry *serviceEntry) error {
+        entry.StartType = "manual"
+        return nil
+    })
+    if err != nil {
+        t.Fatal(err)
+    }
+    if report.Coverage.Status != "collected" || len(report.Coverage.Issues) != 0 {
+        t.Fatalf("fully readable services should remain collected: %+v", report.Coverage)
+    }
+}
