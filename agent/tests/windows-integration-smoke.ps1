@@ -69,6 +69,25 @@ try {
             throw "Collector $source omitted its report."
         }
         Write-Host ("{0}: {1}" -f $source, $collector.status)
+        if ($source -eq 'services' -and $collector.status -eq 'partial') {
+            $coverage = $collector.report.coverage
+            $issues = @($coverage.issues | Where-Object { $null -ne $_ })
+            $entryCount = @($collector.report.entries | Where-Object { $null -ne $_ }).Count
+            Write-Host ("  services enumerated: {0}; coverage issues: {1}" -f $entryCount, $issues.Count)
+            if ($issues.Count -eq 0) {
+                throw 'Services reported partial coverage without issue diagnostics.'
+            }
+            foreach ($issue in $issues) {
+                if ([string]::IsNullOrWhiteSpace($issue.operation) -or [string]::IsNullOrWhiteSpace($issue.code)) {
+                    throw 'Services coverage issue is missing operation or code.'
+                }
+            }
+            $groups = $issues | Group-Object -Property operation, code | Sort-Object -Property Name
+            foreach ($group in $groups) {
+                Write-Host ("  issue: {0}; count: {1}" -f $group.Name, $group.Count)
+            }
+            Write-Host '  NOTE: partial coverage is retained; no permissions are changed.'
+        }
     }
     Write-Host ("Aggregate inventory status: {0}" -f $report.status)
     if ($report.status -eq 'error') {
