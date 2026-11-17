@@ -193,8 +193,6 @@ export default function Page() {
   const view = sourceScanOpen ? "scan-history" : scheduleHistoryOpen ? "scan-schedules" : route.view;
   const currentView = view === "endpoint-onboarding" && (!live || !canOnboard) ? "endpoints" : view;
   const findingsOpen = currentView === "findings";
-  const viewLabel = sections.find(section => section.id === currentView)?.label ??
-    (currentView === "scan-history" ? "Scan history" : currentView === "scan-schedules" ? "Scan schedules" : "Endpoint onboarding");
   const hostnames = new Map(endpoints.map(endpoint => [endpoint.id, endpoint.hostname]));
   const jobs = live ? liveJobs.map(job => ({ ...job, endpointLabel: hostnames.get(job.endpoint_id) })) : previewJobs;
   const query = search.trim().toLowerCase();
@@ -353,7 +351,7 @@ export default function Page() {
     </aside>
     <div className="workspace">
       <header className="topbar" ref={topbar}>
-        <div className="breadcrumb"><span>Operations</span><ChevronRight size={15} /><strong>{viewLabel}</strong></div>
+        <span className="topbar-label">Operations</span>
         <button className="button connect" type="button" onClick={() => { setDialogIssue(""); dialog.current?.showModal(); }}>
           <Plug size={16} />{live ? "API connected" : "Connect API"}
         </button>

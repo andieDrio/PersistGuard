@@ -1,7 +1,7 @@
 # Standard UI/UX Guide — Advanced XDR
 
-**Version:** 1.2  
-**Date:** 2026-11-15  
+**Version:** 1.3\
+**Date:** 2026-11-17\
 **Status:** Baseline for GUI development
 
 ## 1. Purpose and Scope
@@ -65,7 +65,7 @@ Target navigation for supported capabilities. Keep the active release navigation
 15. Reports / Audit
 16. Settings / Integrations
 
-Navigation rules: clear page titles, consistent sidebar, breadcrumbs for nested pages, persistent search/filter context, and visible active location.
+Use clear page titles, a consistent sidebar, in-content links to parent views, persistent search and filter context, and a visible active location.
 
 ## 6. Design System and Tokens
 - Define reusable tokens for color, typography, spacing, elevation, radius, and breakpoints.
@@ -190,6 +190,7 @@ For every GUI change, confirm:
 | 1.0 | 2026-11-15 | Initial XDR UI/UX standard and mandatory development loop | Pending review |
 | 1.1 | 2026-11-15 | Restrict initial application roles to Admin, Analyst, Viewer; define RBAC matrix and enforcement rules | User-directed |
 | 1.2 | 2026-11-15 | Link the GUI baseline to the shared project loop and architecture-owned permissions | User-directed |
+| 1.3 | 2026-11-17 | Keep Operations as the only top navigation label | User-directed |
 
 
 ## Locked Global Footer
@@ -211,6 +212,7 @@ Preserve the original dashboard layout, page content sizing, and spacing within 
 
 - Desktop sidebar remains anchored using sticky positioning. Its navigation list scrolls when the viewport is too short to show all links.
 - Top navigation remains visible using sticky positioning.
+- The top navigation displays `Operations` and the API connection control. Each view displays its title in the content area.
 - Footer wording and year behavior remain unchanged.
 - Responsive navigation keeps its original sizing and wrapping; avoid clipping links.
 - Navigation branding and placement are not editable through user-facing GUI settings.
