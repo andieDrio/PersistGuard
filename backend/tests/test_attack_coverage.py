@@ -1,9 +1,12 @@
 import unittest
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
+from fastapi import Response
 
 from fastapi.testclient import TestClient
 
-from persistguard.api import app
+from persistguard.api import app, latest_coverage_validations
 from persistguard.attack_coverage import attack_coverage
 from persistguard.auth import AuthenticatedUser, linked_account
 from persistguard.scan_assessment import assess_scan_report
@@ -34,6 +37,27 @@ class AttackCoverageTests(unittest.TestCase):
         finally:
             app.dependency_overrides.clear()
             app.dependency_overrides.update(before)
+
+    def test_latest_validation_is_tenant_scoped_and_returns_one_record_per_use_case(self):
+        user = AuthenticatedUser("fixture", uuid4(), uuid4(), "viewer", True)
+        record = SimpleNamespace(use_case_id="D-T1053.005", result="passed",
+                                 tested_on=date(2026, 11, 17),
+                                 recorded_at=datetime(2026, 11, 17, tzinfo=timezone.utc))
+        class SessionFixture:
+            def execute(self, statement):
+                compiled = statement.compile()
+                self.sql = str(compiled)
+                self.parameters = compiled.params
+                return [record]
+        session = SessionFixture()
+        response = Response()
+        result = latest_coverage_validations(user, session, response)
+        self.assertEqual(len(result), 1)
+        self.assertEqual((result[0].result, result[0].tested_on), ("passed", date(2026, 11, 17)))
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertIn("row_number()", session.sql)
+        self.assertIn("organization_id", session.sql)
+        self.assertIn(user.organization_id, session.parameters.values())
 
     def test_service_and_task_persistence_fixtures_require_comparable_snapshots(self):
         service = {"mechanism": "windows_service", "name": "Fixture", "display_name": "Fixture", "state": "stopped"}
