@@ -10,6 +10,9 @@ type Coverage = {
   id: string; group: string; use_case: string; technique_id: string; priority: string;
   coverage: "partial" | "planned"; evidence: Evidence | null;
 };
+type LatestValidation = { use_case_id: string; result: "passed" | "failed" | "inconclusive"; tested_on: string; recorded_at: string };
+const latestLabels = { passed: "Passed", failed: "Failed", inconclusive: "Inconclusive" };
+const latestTones = { passed: "green", failed: "red", inconclusive: "amber" };
 const pageSize = 15;
 
 function ValidationDialog({ row, token, close }: { row: Coverage; token: string; close: () => void }) {
@@ -31,6 +34,10 @@ function ValidationDialog({ row, token, close }: { row: Coverage; token: string;
 
 export function AttackCoverage({ token }: { token: string }) {
   const [rows, setRows] = useState<Coverage[] | null>(null);
+  const [latest, setLatest] = useState<Record<string, LatestValidation>>({});
+  const [latestIssue, setLatestIssue] = useState("");
+  const [latestLoading, setLatestLoading] = useState(false);
+  const [latestRevision, setLatestRevision] = useState(0);
   const [issue, setIssue] = useState("");
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("");
@@ -39,13 +46,31 @@ export function AttackCoverage({ token }: { token: string }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) { setRows(null); setLatest({}); return; }
     const request = new AbortController();
     readAPI<Coverage[]>("attack-coverage", token, request.signal)
-      .then(data => { if (!request.signal.aborted) setRows(data); })
+      .then(data => { if (!request.signal.aborted) { setRows(data); setIssue(""); } })
       .catch(error => { if (!request.signal.aborted) setIssue(error.message); });
     return () => request.abort();
   }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const request = new AbortController();
+    setLatestLoading(true);
+    setLatestIssue("");
+    readAPI<LatestValidation[]>("attack-coverage/latest-validations", token, request.signal)
+      .then(data => {
+        if (!request.signal.aborted) {
+          setLatest(Object.fromEntries(data.map(item => [item.use_case_id, item])));
+          setLatestLoading(false);
+        }
+      })
+      .catch(error => {
+        if (!request.signal.aborted) { setLatestIssue(error.message); setLatestLoading(false); }
+      });
+    return () => request.abort();
+  }, [token, latestRevision]);
 
   const groups = [...new Set(rows?.map(row => row.group))];
   const partial = rows?.filter(row => row.coverage === "partial").length ?? 0;
@@ -61,6 +86,7 @@ export function AttackCoverage({ token }: { token: string }) {
     {!token && <p className="section-note">Connect the API to view the coverage matrix.</p>}
     {token && !rows && !issue && <p className="section-note" role="status">Loading coverage…</p>}
     {issue && <p className="api-error rules-message" role="alert">{issue}</p>}
+    {latestIssue && <p className="api-error rules-message" role="alert">Latest validation unavailable: {latestIssue} <button className="button" type="button" onClick={() => setLatestRevision(value => value + 1)}>Retry</button></p>}
     {rows && <>
       <div className="coverage-totals"><span><strong>{rows.length}</strong> baseline use cases</span>
         <span><strong>{partial}</strong> with partial coverage</span><span><strong>{rows.length - partial}</strong> planned</span></div>
@@ -75,8 +101,9 @@ export function AttackCoverage({ token }: { token: string }) {
         </select><ChevronDown size={14} /></label>
       </div>
       <div className="table-scroll"><table className="coverage-table"><thead><tr>
-        <th>Detection use case</th><th>Validation</th><th>Technique</th><th>Priority</th><th>Telemetry</th><th>Detection rule</th><th>Coverage</th>
+        <th>Detection use case</th><th>Latest validation</th><th>Validation</th><th>Technique</th><th>Priority</th><th>Telemetry</th><th>Detection rule</th><th>Coverage</th>
       </tr></thead><tbody>{visible.map(row => <tr key={row.id}><td><strong>{row.use_case}</strong><small>{row.group}</small></td>
+          <td>{latestLoading ? "Loading…" : latestIssue ? "Unavailable" : latest[row.id] ? <div className="coverage-latest"><span className={`badge ${latestTones[latest[row.id].result]}`}><span />{latestLabels[latest[row.id].result]}</span><time dateTime={latest[row.id].tested_on}>{latest[row.id].tested_on}</time></div> : <span className="coverage-not-tested">Not tested</span>}</td>
           <td><button type="button" className="button" aria-haspopup="dialog" aria-label={`Validation for ${row.use_case}`}
             onClick={() => setExpanded(row.id)}>Validation</button></td>
           <td className="mono">{row.technique_id}</td><td>{row.priority}</td><td>{row.evidence ? "Inventory" : "Planned"}</td>
@@ -89,6 +116,6 @@ export function AttackCoverage({ token }: { token: string }) {
         <button className="button icon-button" type="button" aria-label="Next coverage page" disabled={(page + 1) * pageSize >= filtered.length} onClick={() => setPage(page + 1)}><ArrowRight size={15} /></button>
       </div></footer>}
     </>}
-    {selected && <ValidationDialog key={selected.id} row={selected} token={token} close={() => setExpanded(null)} />}
+    {selected && <ValidationDialog key={selected.id} row={selected} token={token} close={() => { setExpanded(null); setLatestRevision(value => value + 1); }} />}
   </section>;
 }
