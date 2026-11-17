@@ -413,6 +413,41 @@ def verify_coverage_use_case(use_case_id: str) -> None:
         raise HTTPException(status_code=404, detail="Coverage use case not found")
 
 
+class LatestCoverageValidation(BaseModel):
+    use_case_id: str
+    result: ValidationResult
+    tested_on: date
+    recorded_at: datetime
+
+
+@app.get("/api/attack-coverage/latest-validations", tags=["Detection Rules"])
+def latest_coverage_validations(
+    user: Annotated[AuthenticatedUser, Depends(local_identity)],
+    session: Annotated[Session, Depends(database_session)],
+    response: Response,
+) -> list[LatestCoverageValidation]:
+    # One tenant-scoped query for the matrix, rather than one request per row.
+    # Test date determines latest; timestamp and ID break same-day ties.
+    ranked = select(
+        CoverageValidation.use_case_id,
+        CoverageValidation.result,
+        CoverageValidation.tested_on,
+        CoverageValidation.recorded_at,
+        func.row_number().over(
+            partition_by=CoverageValidation.use_case_id,
+            order_by=(CoverageValidation.tested_on.desc(),
+                      CoverageValidation.recorded_at.desc(), CoverageValidation.id.desc()),
+        ).label("rank"),
+    ).where(CoverageValidation.organization_id == user.organization_id).subquery()
+    rows = session.execute(select(
+        ranked.c.use_case_id, ranked.c.result, ranked.c.tested_on, ranked.c.recorded_at,
+    ).where(ranked.c.rank == 1)).all()
+    response.headers["Cache-Control"] = "no-store"
+    return [LatestCoverageValidation(use_case_id=row.use_case_id, result=row.result,
+                                     tested_on=row.tested_on, recorded_at=row.recorded_at)
+            for row in rows]
+
+
 @app.get("/api/attack-coverage/{use_case_id}/validations", tags=["Detection Rules"])
 def list_coverage_validations(
     use_case_id: str,
