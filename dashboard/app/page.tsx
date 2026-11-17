@@ -87,14 +87,14 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach, target }:
         <div><dt>Endpoint</dt><dd className="mono endpoint-detail" title={job.endpoint_id}>{job.endpointLabel ?? shortId(job.endpoint_id)}</dd></div>
         <div><dt>Type</dt><dd>{scanTypeLabel(job.scan_type)}</dd></div>
         {job.schedule_id && <div><dt>Trigger</dt><dd>Recurring schedule</dd></div>}
-        <div><dt>Baseline</dt><dd className={assessment?.baseline_job_id ? "mono" : ""}>{assessment?.baseline_job_id ? `#${shortId(assessment.baseline_job_id)}` : "—"}</dd></div>
+        <div><dt>Baseline</dt><dd className={assessment?.baseline_job_id ? "mono" : ""}>{assessment?.baseline_job_id ? `#${shortId(assessment.baseline_job_id)}` : "â€”"}</dd></div>
       </dl>
       {cancel && <div className="detail-actions"><button className="button cancel-button" type="button" onClick={cancel}>Cancel scan</button></div>}
       <div className="detail-tabs" role="group" aria-label="Scan detail view">
         <button type="button" className={tab === "findings" ? "current" : ""} aria-pressed={tab === "findings"} onClick={() => setTab("findings")}>Findings <span>{findings.length}</span></button>
         <button type="button" className={tab === "coverage" ? "current" : ""} aria-pressed={tab === "coverage"} onClick={() => setTab("coverage")}>Coverage</button>
       </div>
-      {pending ? <p className="detail-note" role="status">Loading assessment…</p> : error ? <p className="detail-note" role="alert">{error}</p> : !assessment ?
+      {pending ? <p className="detail-note" role="status">Loading assessmentâ€¦</p> : error ? <p className="detail-note" role="alert">{error}</p> : !assessment ?
         <p className="detail-note">{job.status === "canceled" ? "This scan was canceled before dispatch." :
           job.status === "queued" ? "Waiting for the Windows agent to pick up this scan." :
             "Results will appear after the agent uploads the inventory."}</p> : tab === "findings" ? <>
@@ -204,7 +204,7 @@ function SourceScan({ target, token, endpoints, notice, attach }: {
     {!target ? <p className="api-error" role="alert">This source scan link is invalid.</p> :
       !token ? <p className="panel section-note">Connect the API to open this source scan.</p> :
       issue && !loaded ? <p className="api-error" role="alert">{issue}</p> :
-      !loaded || !job ? <p className="panel section-note" role="status">Loading source scan…</p> :
+      !loaded || !job ? <p className="panel section-note" role="status">Loading source scanâ€¦</p> :
       <ScanDetail job={job} target={target.finding} assessment={loaded.assessment} pending={false} error={loaded.error}
         attach={attach ? finding => attach(job.id, finding) : undefined} />}
   </main>;
@@ -436,7 +436,7 @@ export default function Page() {
     </aside>
     <div className="workspace">
       <header className="topbar" ref={topbar}>
-        <span className="topbar-label">Operations</span>
+        
         <button className="button connect" type="button" onClick={() => { setDialogIssue(""); dialog.current?.showModal(); }}>
           <Plug size={16} />{live ? "API connected" : "Connect API"}
         </button>
@@ -487,7 +487,7 @@ export default function Page() {
               </tr>)}</tbody></table>
               {!items.length && <div className="empty"><ClipboardList size={24} /><strong>{jobs.length ? "No matching scans" : "No scans yet"}</strong><p>{jobs.length ? "Try a different search or status filter." : "Queued scans will appear here."}</p></div>}
             </div>
-            <footer className="pagination"><span>{items.length ? `${currentPage * pageSize + 1}–${currentPage * pageSize + items.length} of ${filtered.length}` : "0 scans"}</span><div>
+            <footer className="pagination"><span>{items.length ? `${currentPage * pageSize + 1}â€“${currentPage * pageSize + items.length} of ${filtered.length}` : "0 scans"}</span><div>
               {live && hasOlder && <button type="button" className="button" disabled={loading} onClick={() => void loadJobs(token, "older")}>Load older</button>}
               <button className="button icon-button" type="button" aria-label="Previous page" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ArrowLeft size={15} /></button>
               <button className="button icon-button" type="button" aria-label="Next page" disabled={currentPage === lastPage} onClick={() => setPage(currentPage + 1)}><ArrowRight size={15} /></button>
@@ -504,12 +504,12 @@ export default function Page() {
       if (!live) { listRequest.current?.abort(); setLoading(false); }
       dialog.current?.querySelector("form")?.reset();
     }}>
-      <div className="dialog-title"><div><h2>{live ? "API connected" : "Connect to PersistGuard"}</h2><p>{live ? "This browser session is using live scan data." : "Enter a linked account’s API access token."}</p></div>
+      <div className="dialog-title"><div><h2>{live ? "API connected" : "Connect to PersistGuard"}</h2><p>{live ? "This browser session is using live scan data." : "Enter a linked accountâ€™s API access token."}</p></div>
         <button className="button icon-button" type="button" aria-label="Close" onClick={() => dialog.current?.close()}><X size={17} /></button></div>
       {live ? <button type="button" className="button" onClick={() => { disconnect(); dialog.current?.close(); }}>Disconnect</button> : <form onSubmit={connect}>
         <label htmlFor="api-token">Access token</label><input id="api-token" type="password" name="token" required autoComplete="off" />
         {dialogIssue && <p role="alert" className="api-error">{dialogIssue}</p>}
-        <button type="submit" className="button primary" disabled={loading}>{loading ? "Connecting…" : "Connect API"}</button>
+        <button type="submit" className="button primary" disabled={loading}>{loading ? "Connectingâ€¦" : "Connect API"}</button>
       </form>}
     </dialog>
     {scanAction && <ScanControlDialog action={scanAction} token={token} close={() => setScanAction(null)} onSaved={saveScan} />}
