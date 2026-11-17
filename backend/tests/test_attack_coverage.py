@@ -48,7 +48,7 @@ class AttackCoverageTests(unittest.TestCase):
                 compiled = statement.compile()
                 self.sql = str(compiled)
                 self.parameters = compiled.params
-                return [record]
+                return SimpleNamespace(all=lambda: [record])
         session = SessionFixture()
         response = Response()
         result = latest_coverage_validations(user, session, response)
