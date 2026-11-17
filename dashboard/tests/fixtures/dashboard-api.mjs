@@ -86,7 +86,11 @@ createServer(async (request, response) => {
         const records = validationRecords.get(authorization) ?? [];
         const latest = [...records].sort((a, b) => b.tested_on.localeCompare(a.tested_on) ||
           b.recorded_at.localeCompare(a.recorded_at));
-        return send(200, [...new Map(latest.map(row => [row.use_case_id, row])).values()]
+        const byUseCase = new Map();
+        for (const row of latest) {
+          if (!byUseCase.has(row.use_case_id)) byUseCase.set(row.use_case_id, row);
+        }
+        return send(200, [...byUseCase.values()]
           .map(({ use_case_id, result, tested_on, recorded_at }) => ({ use_case_id, result, tested_on, recorded_at })));
       }
       case `/api/attack-coverage/${validationCase}/validations`: {
