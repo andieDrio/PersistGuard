@@ -10,6 +10,7 @@ const config: NextConfig = {
     return [
       { source: "/pg-api/findings", destination: `${api}/api/findings` },
       { source: "/pg-api/attack-coverage", destination: `${api}/api/attack-coverage` },
+      { source: "/pg-api/attack-coverage/latest-validations", destination: `${api}/api/attack-coverage/latest-validations` },
       { source: "/pg-api/attack-coverage/:id/validations", destination: `${api}/api/attack-coverage/:id/validations` },
       { source: "/pg-api/detection-rules", destination: `${api}/api/detection-rules` },
       { source: "/pg-api/detection-rules/import", destination: `${api}/api/detection-rules/import` },
