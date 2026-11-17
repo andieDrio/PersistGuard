@@ -8,6 +8,16 @@ const endpoint = {
   has_device_key: true,
 };
 const revoked = new Set();
+const validationRecords = new Map();
+const validationCase = "D-T1053.005";
+const validationCatalog = [
+  { id: validationCase, group: "Persistence", use_case: "Scheduled task persistence", technique_id: "T1053.005",
+    priority: "P1", coverage: "partial", evidence: { telemetry: "Scheduled task inventory",
+      rule: "New-task baseline comparison", validation: "Fixture evidence" } },
+  { id: "D-T1543.003", group: "Persistence", use_case: "Windows service persistence", technique_id: "T1543.003",
+    priority: "P1", coverage: "partial", evidence: { telemetry: "Service inventory",
+      rule: "New-service baseline comparison", validation: "Fixture evidence" } },
+];
 const rule = {
   id: "f82ee004-ea52-4b49-8e77-badfdbbeb6be", name: "Restore regression rule",
   source: "services", field: "command", pattern: "fixture-agent.exe", score: 50,
@@ -71,6 +81,20 @@ createServer(async (request, response) => {
 
   if (request.method === "GET") {
     switch (pathname) {
+      case "/api/attack-coverage": return send(200, validationCatalog);
+      case "/api/attack-coverage/latest-validations": {
+        const records = validationRecords.get(authorization) ?? [];
+        const latest = [...records].sort((a, b) => b.tested_on.localeCompare(a.tested_on) ||
+          b.recorded_at.localeCompare(a.recorded_at));
+        return send(200, [...new Map(latest.map(row => [row.use_case_id, row])).values()]
+          .map(({ use_case_id, result, tested_on, recorded_at }) => ({ use_case_id, result, tested_on, recorded_at })));
+      }
+      case `/api/attack-coverage/${validationCase}/validations`: {
+        const records = (validationRecords.get(authorization) ?? []).slice().sort((a, b) =>
+          b.tested_on.localeCompare(a.tested_on) || b.recorded_at.localeCompare(a.recorded_at));
+        const offset = Number(searchParams.get("offset") ?? 0);
+        return send(200, { records: records.slice(offset, offset + 25), next_offset: null, can_manage: role !== "viewer" });
+      }
       case "/api/scan-jobs": return send(200, queuedScans.get(authorization) ?? []);
       case "/api/scan-schedules": return send(200, { has_more: false, schedules: scanSchedules.has(authorization) ?
         [scanSchedules.get(authorization)] : role === "viewer" ? [fixtureSchedule] : [] });
@@ -122,6 +146,21 @@ createServer(async (request, response) => {
     }
   }
 
+  if (request.method === "POST" && pathname === `/api/attack-coverage/${validationCase}/validations`) {
+    if (role === "viewer") return send(403, { detail: "Active admin or analyst access required" });
+    const body = await readJSON(request);
+    if (!["passed", "failed", "inconclusive"].includes(body?.result) ||
+        !/^\\d{4}-\\d{2}-\\d{2}$/.test(body?.tested_on ?? "") || !body?.reference?.trim())
+      return send(422, { detail: "Invalid validation" });
+    const records = validationRecords.get(authorization) ?? [];
+    const existing = records.find(row => row.tested_on === body.tested_on && row.result === body.result &&
+      row.reference === body.reference);
+    if (existing) return send(200, existing);
+    const record = { ...body, id: crypto.randomUUID(), use_case_id: validationCase,
+      recorded_by: endpoint.id, recorded_role: role, recorded_at: new Date().toISOString() };
+    validationRecords.set(authorization, [...records, record]);
+    return send(201, record);
+  }
   if (request.method === "POST" && pathname === "/api/scan-schedules") {
     if (role === "viewer") return send(403, { detail: "Recurring scans require an admin or analyst" });
     if (scanSchedules.has(authorization)) return send(409, { detail: "This endpoint already has a schedule for this scope. Edit the existing schedule." });
