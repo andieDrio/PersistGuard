@@ -13,3 +13,5 @@ node_modules/
 *.key
 *.p12
 *.pfx
+
+.local-agent-ca/
