@@ -150,7 +150,7 @@ createServer(async (request, response) => {
     if (role === "viewer") return send(403, { detail: "Active admin or analyst access required" });
     const body = await readJSON(request);
     if (!["passed", "failed", "inconclusive"].includes(body?.result) ||
-        !/^\\d{4}-\\d{2}-\\d{2}$/.test(body?.tested_on ?? "") || !body?.reference?.trim())
+        !/^\d{4}-\d{2}-\d{2}$/.test(body?.tested_on ?? "") || !body?.reference?.trim())
       return send(422, { detail: "Invalid validation" });
     const records = validationRecords.get(authorization) ?? [];
     const existing = records.find(row => row.tested_on === body.tested_on && row.result === body.result &&
