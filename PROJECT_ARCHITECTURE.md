@@ -461,6 +461,11 @@ occurrence in the same transaction as the schedule update and any new scan job.
 The tenant-scoped history shows the current status of linked jobs using the
 existing scan queue and preserves skipped and automatically paused attempts.
 
+The tenant-scoped scan target list includes the approved Windows endpoint's last
+authenticated heartbeat and uses the same two-minute freshness window as the
+Endpoints view. The manual and recurring scan forms display this status.
+Approved endpoints remain eligible when their heartbeat is stale or missing.
+
 ## **Suggested Scan Lifecycle**
 
 ```

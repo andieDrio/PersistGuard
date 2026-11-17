@@ -120,7 +120,10 @@ createServer(async (request, response) => {
       case `/api/scan-jobs/${sourceScan.id}/assessment`:
       case `/api/scan-jobs/${scheduledScan.id}/assessment`: return send(200, {
         status: "partial", baseline_job_id: null, collectors: {
-          services: { status: "collected", coverage: [], assessments: [serviceFinding] },
+          services: { status: "partial", coverage: [{ status: "partial", issues: [
+            { name: "FixtureService", operation: "query_config", code: "access_denied" },
+            { code: "read_failed" },
+          ] }], assessments: [serviceFinding] },
           scheduled_tasks: { status: "partial", coverage: [{ error: "fixture_coverage_gap" }], assessments: [taskFinding] },
         },
       });
@@ -135,7 +138,7 @@ createServer(async (request, response) => {
           scan_count: 1, scan_batch_size: 5, has_older_scans: false, page_size: 25 });
       }
       case "/api/scan-targets": return send(200, { can_manage: role !== "viewer", can_onboard: isAdmin,
-        endpoints: [{ id: endpoint.id, hostname: endpoint.hostname }] });
+        endpoints: [{ id: endpoint.id, hostname: endpoint.hostname, last_seen: new Date().toISOString(), connected: true }] });
       case "/api/workspace": return send(200, {
         tenant: { name: "Regression tenant", count: 1 },
         can_manage: role !== "viewer",

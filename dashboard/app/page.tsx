@@ -6,22 +6,29 @@ import {
   CircleAlert, ClipboardList, Layers3, ListFilter, Monitor, Plug, RefreshCw, Search,
   Plus, ShieldCheck, TriangleAlert, UserRoundPlus, X,
 } from "lucide-react";
-import { readAPI } from "./api";
+import { APIError, pollWhileVisible, readAPI } from "./api";
 import { AttachFindingDialog } from "./case-findings";
 import { EndpointOnboarding } from "./endpoint-onboarding";
 import { ScanControlDialog, type ScanAction, type ScanTarget, type ScanTargets } from "./scan-controls";
 import { ScanScheduleHistory, ScanSchedules } from "./scan-schedules";
 import { activeStatuses, parseScanLink, previewAssessment, previewJobs, scanScheduleHistoryHref, scanTypeLabel, sourceNames, terminalStatuses,
-  type Assessment, type Finding, type Job, type ScanFindingTarget, type ScanLinkTarget } from "./scan-data";
+  type Assessment, type Collector, type Finding, type Job, type ScanFindingTarget, type ScanLinkTarget } from "./scan-data";
 import { sections, WorkspaceSection } from "./workspace";
 
 const pageSize = 7;
 const batchSize = 100;
+const scanPollIntervalMs = 5000;
 const dateFormat = new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", timeZone: "Asia/Singapore" });
 const timeFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
+const refreshTimeFormat = new Intl.DateTimeFormat("en-GB", { timeStyle: "medium", timeZone: "Asia/Singapore" });
 const shortId = (id: string) => id.slice(0, 8);
 const label = (value: string) => value.replaceAll("_", " ").replace(/^./, first => first.toUpperCase());
 const findingSeverities = ["critical", "high", "medium", "low", "info"];
+const serviceOperations = new Map([
+  ["query_config", "Query configuration"],
+  ["open_manager", "Open Service Control Manager"],
+  ["enumerate_services", "Enumerate services"],
+]);
 type View = typeof sections[number]["id"] | "scan-history" | "scan-schedules" | "endpoint-onboarding";
 type Route = { view: View } | { view: "source-scan"; query: string; keepFindings: boolean } |
   { view: "schedule-history"; scheduleId: string | null };
@@ -31,6 +38,23 @@ function Badge({ status }: { status: string }) {
   const tone = ["completed", "collected"].includes(status) ? "green" : status === "partial" ? "amber" :
     ["failed", "error"].includes(status) ? "red" : activeStatuses.includes(status) && status !== "queued" ? "blue" : "neutral";
   return <span className={`badge ${tone}`}><span />{label(status)}</span>;
+}
+
+function CollectorCoverage({ source, collector }: { source: string; collector: Collector }) {
+  const messages = collector.coverage.flatMap(({ error, issues }) => [
+    error && label(error),
+    ...(issues ?? []).map(({ code, name, operation }) => {
+      const reason = code && label(code);
+      if (source !== "services") return reason;
+      const action = operation && (serviceOperations.get(operation) ?? label(operation));
+      return [name, action, reason].filter(Boolean).join(" · ");
+    }),
+  ]);
+  return <div className="coverage-item">
+    <div><strong>{sourceNames[source] ?? label(source)}</strong><Badge status={collector.status} /></div>
+    {collector.error && <p>{collector.error}</p>}
+    {messages.filter(Boolean).map((message, index) => <p key={index}>{message}</p>)}
+  </div>;
 }
 
 function ScanDetail({ job, assessment, pending, error, cancel, attach, target }: {
@@ -59,7 +83,7 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach, target }:
       <p>{job ? `Scan #${shortId(job.id)}` : "Select a scan"}</p></div></div>
     {job && <>
       <dl className="detail-meta">
-        <div><dt>Status</dt><dd><Badge status={job.status} /></dd></div>
+        <div><dt>Status</dt><dd aria-live="polite"><Badge status={job.status} /></dd></div>
         <div><dt>Endpoint</dt><dd className="mono endpoint-detail" title={job.endpoint_id}>{job.endpointLabel ?? shortId(job.endpoint_id)}</dd></div>
         <div><dt>Type</dt><dd>{scanTypeLabel(job.scan_type)}</dd></div>
         {job.schedule_id && <div><dt>Trigger</dt><dd>Recurring schedule</dd></div>}
@@ -71,7 +95,9 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach, target }:
         <button type="button" className={tab === "coverage" ? "current" : ""} aria-pressed={tab === "coverage"} onClick={() => setTab("coverage")}>Coverage</button>
       </div>
       {pending ? <p className="detail-note" role="status">Loading assessment…</p> : error ? <p className="detail-note" role="alert">{error}</p> : !assessment ?
-        <p className="detail-note">{job.status === "canceled" ? "This scan was canceled before dispatch." : "Results will appear after the agent uploads the inventory."}</p> : tab === "findings" ? <>
+        <p className="detail-note">{job.status === "canceled" ? "This scan was canceled before dispatch." :
+          job.status === "queued" ? "Waiting for the Windows agent to pick up this scan." :
+            "Results will appear after the agent uploads the inventory."}</p> : tab === "findings" ? <>
           {target && <div className="finding-filters"><div className="finding-filter-actions">
             <button className="button" type="button" onClick={() => setShowAll(!showAll)}>
               {linkedOnly ? "Show all findings" : "Show linked finding"}</button>
@@ -100,12 +126,7 @@ function ScanDetail({ job, assessment, pending, error, cancel, attach, target }:
             {attach && finding.fingerprint && <button className="button attach-finding-button" type="button" onClick={() => attach(finding)}>Attach to case</button>}
           </div>)}
         </div></> : <div className="detail-content">
-          {collectors.map(([key, collector]) => <div className="coverage-item" key={key}>
-            <div><strong>{sourceNames[key] ?? label(key)}</strong><Badge status={collector.status} /></div>
-            {collector.error && <p>{collector.error}</p>}
-            {collector.coverage.flatMap(item => [item.error, ...(item.issues ?? []).map(issue => issue.code)])
-              .filter((value): value is string => Boolean(value)).map((value, index) => <p key={index}>{label(value)}</p>)}
-          </div>)}
+          {collectors.map(([source, collector]) => <CollectorCoverage key={source} source={source} collector={collector} />)}
         </div>}
     </>}
   </aside>;
@@ -116,8 +137,9 @@ function SourceScan({ target, token, endpoints, notice, attach }: {
   attach?: (jobId: string, finding: ScanFinding) => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
-  const [loaded, setLoaded] = useState<{ job: Job; assessment: Assessment | null; error: string }>();
+  const [loaded, setLoaded] = useState<{ job: Job; assessment: Assessment | null; error: string; checkedAt: Date }>();
   const [issue, setIssue] = useState("");
+  const [revision, setRevision] = useState(0);
   const jobId = target?.jobId;
   const scheduleId = target?.scheduleId;
 
@@ -128,36 +150,60 @@ function SourceScan({ target, token, endpoints, notice, attach }: {
 
   useEffect(() => {
     if (!token || !jobId) return;
-    const request = new AbortController();
     const path = `scan-jobs/${encodeURIComponent(jobId)}`;
-    async function load() {
+    return pollWhileVisible(async request => {
       try {
-        const job = await readAPI<Job>(path, token, request.signal);
-        if (scheduleId && job.schedule_id !== scheduleId) throw new Error("This scan is unavailable for this schedule.");
-        if (request.signal.aborted) return;
-        const result = { job, assessment: null as Assessment | null, error: "" };
-        if (terminalStatuses.includes(job.status)) {
-          try { result.assessment = await readAPI<Assessment>(`${path}/assessment`, token, request.signal); }
-          catch (cause) { result.error = cause instanceof Error ? cause.message : "The scan assessment is unavailable."; }
+        const signal = AbortSignal.any([request, AbortSignal.timeout(10000)]);
+        const job = await readAPI<Job>(path, token, signal);
+        if (request.aborted) return false;
+        if (scheduleId && job.schedule_id !== scheduleId) {
+          setLoaded(undefined);
+          setIssue("This scan is unavailable for this schedule.");
+          return false;
         }
-        if (!request.signal.aborted) setLoaded(result);
+
+        const result = { job, assessment: null as Assessment | null, error: "", checkedAt: new Date() };
+        let retry = activeStatuses.includes(job.status);
+        if (terminalStatuses.includes(job.status)) {
+          try {
+            result.assessment = await readAPI<Assessment>(`${path}/assessment`, token, signal);
+          } catch (cause) {
+            if (cause instanceof APIError && [401, 403].includes(cause.status)) throw cause;
+            result.error = cause instanceof Error ? cause.message : "The scan assessment is unavailable.";
+            retry = !(cause instanceof APIError) || cause.status >= 500 || cause.status === 429;
+          }
+        }
+        if (request.aborted) return false;
+        setLoaded(result);
+        setIssue("");
+        return retry;
       } catch (cause) {
-        if (!request.signal.aborted) setIssue(cause instanceof Error ? cause.message : "The source scan is unavailable.");
+        if (request.aborted) return false;
+        setIssue(cause instanceof Error ? cause.message : "The source scan is unavailable.");
+        if (cause instanceof APIError && [401, 403, 404].includes(cause.status)) {
+          setLoaded(undefined);
+          return false;
+        }
+        return true;
       }
-    }
-    void load();
-    return () => request.abort();
-  }, [jobId, scheduleId, token]);
+    });
+  }, [jobId, scheduleId, token, revision]);
 
   const job = loaded && { ...loaded.job, endpointLabel: endpoints.find(endpoint => endpoint.id === loaded.job.endpoint_id)?.hostname };
   return <main className="source-scan">
-    <div className="heading"><h1 ref={heading} tabIndex={-1}>Source scan</h1>
-      <a className="button" href={scheduleId ? scanScheduleHistoryHref(scheduleId) : "#findings"}>
-        <ArrowLeft size={15} />{scheduleId ? "Back to run history" : "Back to Findings"}</a></div>
+    <div className="heading"><div><h1 ref={heading} tabIndex={-1}>Source scan</h1>
+      {loaded && <p>Last status check <time dateTime={loaded.checkedAt.toISOString()}>{refreshTimeFormat.format(loaded.checkedAt)} SGT</time></p>}</div>
+      <div className="heading-actions">
+        <a className="button" href={scheduleId ? scanScheduleHistoryHref(scheduleId) : "#findings"}>
+          <ArrowLeft size={15} />{scheduleId ? "Back to run history" : "Back to Findings"}</a>
+        {jobId && token && <button className="button refresh" type="button" onClick={() => setRevision(value => value + 1)}>
+          <RefreshCw size={15} />Refresh scan</button>}
+      </div></div>
     {notice && <p className="action-notice" role="status"><Check size={16} />{notice}</p>}
+    {loaded && issue && <p className="api-error" role="alert">Scan status may be out of date. {issue}</p>}
     {!target ? <p className="api-error" role="alert">This source scan link is invalid.</p> :
       !token ? <p className="panel section-note">Connect the API to open this source scan.</p> :
-      issue ? <p className="api-error" role="alert">{issue}</p> :
+      issue && !loaded ? <p className="api-error" role="alert">{issue}</p> :
       !loaded || !job ? <p className="panel section-note" role="status">Loading source scan…</p> :
       <ScanDetail job={job} target={target.finding} assessment={loaded.assessment} pending={false} error={loaded.error}
         attach={attach ? finding => attach(job.id, finding) : undefined} />}
@@ -174,6 +220,8 @@ export default function Page() {
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [issue, setIssue] = useState("");
+  const [pollIssue, setPollIssue] = useState("");
+  const [lastStatusCheck, setLastStatusCheck] = useState<Date | null>(null);
   const [notice, setNotice] = useState("");
   const [canManage, setCanManage] = useState(false);
   const [canOnboard, setCanOnboard] = useState(false);
@@ -183,6 +231,7 @@ export default function Page() {
   const [attachTarget, setAttachTarget] = useState<{ jobId: string; finding: ScanFinding } | null>(null);
   const [dialogIssue, setDialogIssue] = useState("");
   const [detail, setDetail] = useState<{ id: string; data: Assessment | null; error: string } | null>(null);
+  const [assessmentRevision, setAssessmentRevision] = useState(0);
   const sidebar = useRef<HTMLElement>(null);
   const topbar = useRef<HTMLElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -204,6 +253,9 @@ export default function Page() {
   const selected = items.find(job => job.id === selectedId) ?? items[0];
   const selectedJobId = selected?.id;
   const hasResult = terminalStatuses.includes(selected?.status ?? "");
+  const scanHistoryOpen = currentView === "scan-history" && !sourceScanOpen;
+  const activePageIds = items.filter(job => activeStatuses.includes(job.status)).map(job => job.id).join(",");
+  const pollIds = live && scanHistoryOpen && !loading && !scanAction ? activePageIds : "";
 
   useEffect(() => {
     const sidebarElement = sidebar.current;
@@ -221,13 +273,41 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    if (!token || currentView !== "scan-history" || sourceScanOpen || !selectedJobId || !hasResult) return;
+    if (!token || !scanHistoryOpen || !selectedJobId || !hasResult) return;
     const request = new AbortController();
     readAPI<Assessment>(`scan-jobs/${encodeURIComponent(selectedJobId)}/assessment`, token, request.signal)
       .then(data => { if (!request.signal.aborted) setDetail({ id: selectedJobId, data, error: "" }); })
       .catch(error => { if (!request.signal.aborted) setDetail({ id: selectedJobId, data: null, error: error.message }); });
     return () => request.abort();
-  }, [token, currentView, sourceScanOpen, selectedJobId, hasResult, liveJobs]);
+  }, [token, scanHistoryOpen, selectedJobId, hasResult, assessmentRevision]);
+
+  useEffect(() => {
+    if (!pollIds) return;
+    const request = new AbortController();
+    const ids = pollIds.split(",");
+    let timer: number;
+    function schedule() {
+      timer = window.setTimeout(poll, scanPollIntervalMs);
+    }
+    async function poll() {
+      if (document.hidden) { schedule(); return; }
+      const results = await Promise.allSettled(ids.map(id =>
+        readAPI<Job>(`scan-jobs/${encodeURIComponent(id)}`, token, request.signal)));
+      if (request.signal.aborted) return;
+      const statuses = new Map(results.flatMap(result =>
+        result.status === "fulfilled" ? [[result.value.id, result.value.status] as const] : []));
+      setLiveJobs(previous => previous.map(job => {
+        const status = statuses.get(job.id);
+        return status && status !== job.status ? { ...job, status } : job;
+      }));
+      const failure = results.find(result => result.status === "rejected");
+      setPollIssue(failure ? (failure.reason instanceof Error ? failure.reason.message : "Try refreshing Scan history.") : "");
+      if (!failure) setLastStatusCheck(new Date());
+      schedule();
+    }
+    schedule();
+    return () => { request.abort(); window.clearTimeout(timer); };
+  }, [pollIds, token]);
 
   useEffect(() => () => listRequest.current?.abort(), []);
 
@@ -269,12 +349,15 @@ export default function Page() {
       ]);
       if (request.signal.aborted) return;
       if (targets) { setCanManage(targets.can_manage); setCanOnboard(targets.can_onboard); setEndpoints(targets.endpoints); }
+      setLastStatusCheck(new Date());
+      if (mode !== "older") setPollIssue("");
       setHasOlder(entries.length === batchSize);
       if (mode === "older") {
         setLiveJobs(previous => [...previous, ...entries.filter(entry => !previous.some(job => job.id === entry.id))]);
       } else {
         setLiveJobs(entries);
         setDetail(null);
+        setAssessmentRevision(value => value + 1);
         setPage(0);
       }
       if (mode === "connect") {
@@ -303,6 +386,7 @@ export default function Page() {
   function disconnect() {
     listRequest.current?.abort();
     setLoading(false); setToken(""); setLiveJobs([]); setDetail(null); setIssue(""); setSearch(""); setStatus("all");
+    setLastStatusCheck(null); setPollIssue("");
     setSelectedId(previewJobs[0].id); setPage(0);
     setCanManage(false); setCanOnboard(false); setEndpoints([]); setScanAction(null); setAttachTarget(null); setNotice("");
   }
@@ -317,7 +401,8 @@ export default function Page() {
     setStatus("all"); setSearch("");
     setPage(Math.floor(next.findIndex(entry => entry.id === job.id) / pageSize));
     setScanAction(null); setIssue("");
-    setNotice(action.kind === "cancel" ? `Scan #${shortId(job.id)} canceled.` : `Scan #${shortId(job.id)} · ${label(job.status)}`);
+    setNotice(action.kind === "cancel" ? `Scan #${shortId(job.id)} canceled.` :
+      `Scan request accepted for #${shortId(job.id)}.`);
   }
 
   function attachFinding(jobId: string, finding: ScanFinding) {
@@ -377,10 +462,14 @@ export default function Page() {
           <div className="stat panel" key={name}><div className="stat-line"><span>{name}</span><span className={`stat-icon ${tone}`}><Icon size={17} /></span></div><strong>{count}</strong><small>{caption}</small></div>
         )}</div>
         {issue && <p className="api-error" role="alert"><CircleAlert size={16} />{issue}</p>}
+        {!issue && pollIssue && <p className="api-error" role="alert"><CircleAlert size={16} />Scan statuses may be out of date. {pollIssue}</p>}
         {notice && <p className="action-notice" role="status"><Check size={16} />{notice}</p>}
         <div className="content-grid" id="scan-history">
           <section className="jobs panel" aria-label="Inventory jobs">
-            <div className="table-heading"><div><h2>Inventory jobs</h2><p>{live ? "Scans in your organization" : "Sample scans for this preview"}</p></div><span className="jobs-count">{jobs.length} scans</span></div>
+            <div className="table-heading"><div><h2>Inventory jobs</h2><p>{live ? lastStatusCheck ?
+              <>Last status check <time dateTime={lastStatusCheck.toISOString()}>{refreshTimeFormat.format(lastStatusCheck)} SGT</time></> :
+              "Scans in your organization" : "Showing sample scans. Connect API to view your scan history."}</p></div>
+              <span className="jobs-count">{jobs.length} scans</span></div>
             <div className="filters"><label className="search"><Search size={17} /><input aria-label="Search scans or endpoints" placeholder="Search scans or endpoints" value={search} onChange={event => { setSearch(event.target.value); setPage(0); }} /></label>
               <label className="filter"><ListFilter size={16} /><select aria-label="Filter by status" value={status} onChange={event => { setStatus(event.target.value); setPage(0); }}>
                 <option value="all">All statuses</option><option value="active">In progress</option>

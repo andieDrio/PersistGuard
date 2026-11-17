@@ -5,9 +5,14 @@ import { X } from "lucide-react";
 import { readAPI } from "./api";
 import { scanTypes, type Job } from "./scan-data";
 
-export type ScanTarget = { id: string; hostname: string };
+export type ScanTarget = { id: string; hostname: string; last_seen?: string | null; connected?: boolean };
 export type ScanTargets = { can_manage: boolean; can_onboard: boolean; endpoints: ScanTarget[] };
 export type ScanAction = { kind: "queue" } | { kind: "cancel"; job: Job };
+
+const heartbeatTime = new Intl.DateTimeFormat("en-SG", {
+  day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  hourCycle: "h23", timeZone: "Asia/Singapore",
+});
 
 export function ScanTargetFields({ token, busy, target, scanType, setTarget, setScanType }: {
   token: string; busy: boolean; target: string; scanType: string;
@@ -16,6 +21,7 @@ export function ScanTargetFields({ token, busy, target, scanType, setTarget, set
   const [query, setQuery] = useState("");
   const [targets, setTargets] = useState<{ query: string; entries: ScanTarget[]; error: string } | null>(null);
   const results = targets?.query === query ? targets : null;
+  const endpoint = results?.entries.find(entry => entry.id === target);
 
   useEffect(() => {
     const request = new AbortController();
@@ -32,10 +38,20 @@ export function ScanTargetFields({ token, busy, target, scanType, setTarget, set
     <input id="target-query" maxLength={253} value={query} placeholder="Search by hostname" disabled={busy}
       onChange={event => { setTarget(""); setQuery(event.target.value); }} />
     <label htmlFor="scan-target">Endpoint</label>
-    <select id="scan-target" required value={target} disabled={busy || !results?.entries.length} onChange={event => setTarget(event.target.value)}>
+    <select id="scan-target" required value={target} disabled={busy || !results?.entries.length}
+      aria-describedby={endpoint ? "scan-target-health" : undefined} onChange={event => setTarget(event.target.value)}>
       <option value="">{!results ? "Loading endpoints…" : results.entries.length ? "Select an endpoint" : "No matching endpoints"}</option>
       {results?.entries.map(endpoint => <option value={endpoint.id} key={endpoint.id}>{endpoint.hostname} ({endpoint.id.slice(0, 8)})</option>)}
     </select>
+    {endpoint && <div id="scan-target-health" className="muted" role="status">
+      {typeof endpoint.connected !== "boolean" ? "Heartbeat status unavailable." : <>
+        <span className={`badge ${endpoint.connected ? "green" : "amber"}`}><span />
+          {endpoint.connected ? "Connected" : "Disconnected"}
+        </span>{" · Last heartbeat "}
+        {endpoint.last_seen ? <time dateTime={endpoint.last_seen}>{heartbeatTime.format(new Date(endpoint.last_seen))} SGT</time> : "Never"}
+        {!endpoint.connected && <p>Queued scans wait for the agent to poll.</p>}
+      </>}
+    </div>}
     <label htmlFor="scan-scope">Scan scope</label>
     <select id="scan-scope" value={scanType} disabled={busy} onChange={event => setScanType(event.target.value)}>
       {Object.entries(scanTypes).map(([type, label]) => <option value={type} key={type}>{label}</option>)}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Plus, RefreshCw, X } from "lucide-react";
-import { readAPI } from "./api";
+import { APIError, pollWhileVisible, readAPI } from "./api";
 import { ScanTargetFields } from "./scan-controls";
 import { isUUID, scanScheduleHistoryHref, scanTypeLabel, scheduledScanHref } from "./scan-data";
 
@@ -21,6 +21,7 @@ const frequencies = { daily: "Daily", weekly: "Weekly" };
 const outcomes = { queued: "Queued", skipped_busy: "Skipped · unfinished scan", paused_endpoint: "Paused · endpoint ineligible",
   paused_owner: "Paused · scheduler access changed" };
 const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const checkTimeFormat = new Intl.DateTimeFormat("en-GB", { timeStyle: "medium", timeZone: "Asia/Singapore" });
 const pageSize = 25;
 
 function localDateTime(value: string) {
@@ -178,7 +179,7 @@ export function ScanScheduleHistory({ token, scheduleId }: { token: string; sche
   const heading = useRef<HTMLHeadingElement>(null);
   const [offset, setOffset] = useState(0);
   const [revision, setRevision] = useState(0);
-  const [loaded, setLoaded] = useState<{ offset: number; data?: RunPage; error?: string }>();
+  const [loaded, setLoaded] = useState<{ offset: number; data?: RunPage; error?: string; checkedAt?: Date }>();
   const active = loaded?.offset === offset ? loaded : undefined;
   const data = active?.data;
   const valid = isUUID(scheduleId);
@@ -190,11 +191,25 @@ export function ScanScheduleHistory({ token, scheduleId }: { token: string; sche
 
   useEffect(() => {
     if (!token || !valid) return;
-    const request = new AbortController();
-    readAPI<RunPage>(`scan-schedules/${scheduleId}/runs?limit=${pageSize}&offset=${offset}`, token, request.signal)
-      .then(data => { if (!request.signal.aborted) setLoaded({ offset, data }); })
-      .catch((cause: Error) => { if (!request.signal.aborted) setLoaded({ offset, error: cause.message }); });
-    return () => request.abort();
+    const path = `scan-schedules/${scheduleId}/runs?limit=${pageSize}&offset=${offset}`;
+    return pollWhileVisible(async request => {
+      try {
+        const signal = AbortSignal.any([request, AbortSignal.timeout(10000)]);
+        const data = await readAPI<RunPage>(path, token, signal);
+        if (request.aborted) return false;
+        setLoaded({ offset, data, checkedAt: new Date() });
+      } catch (cause) {
+        if (request.aborted) return false;
+        const error = cause instanceof Error ? cause.message : "Could not refresh run history.";
+        // A transient failure can retain the current page. A denied or missing resource cannot.
+        if (cause instanceof APIError && [401, 403, 404].includes(cause.status)) {
+          setLoaded({ offset, error });
+          return false;
+        }
+        setLoaded(previous => previous?.offset === offset ? { ...previous, error } : { offset, error });
+      }
+      return true;
+    });
   }, [scheduleId, valid, offset, revision, token]);
 
   return <main>
@@ -207,9 +222,13 @@ export function ScanScheduleHistory({ token, scheduleId }: { token: string; sche
       </div></div>
     {!valid ? <p className="api-error" role="alert">This scan schedule link is invalid.</p> :
       !token ? <p className="panel section-note">Connect the API to view run history.</p> :
-      active?.error ? <p className="api-error" role="alert">{active.error}</p> :
+      active?.error && !data ? <p className="api-error" role="alert">{active.error}</p> :
       !data ? <p className="panel section-note" role="status">Loading run history…</p> :
       <section className="panel jobs" aria-label="Schedule runs">
+        {active?.checkedAt && <div className="table-heading">
+          <p>Last status check <time dateTime={active.checkedAt.toISOString()}>{checkTimeFormat.format(active.checkedAt)} SGT</time></p>
+        </div>}
+        {active?.error && <p className="api-error rules-message" role="alert">Run history may be out of date. {active.error}</p>}
         {data.runs.length ? <div className="table-scroll"><table className="scan-schedules-table">
           <thead><tr><th>Scheduled for</th><th>Attempted at</th><th>Outcome</th><th>Scan job</th></tr></thead>
           <tbody>{data.runs.map(run => <tr key={run.id}>
@@ -218,7 +237,7 @@ export function ScanScheduleHistory({ token, scheduleId }: { token: string; sche
             <td>{outcomes[run.outcome]}</td>
             <td>{run.job_id ? <><a className="source-scan-link mono" href={scheduledScanHref(run.job_id, data.schedule.id)}>
               Scan #{run.job_id.slice(0, 8)}</a>
-              {run.job_status && <small>{run.job_status[0].toUpperCase() + run.job_status.slice(1)}</small>}</> : "—"}</td>
+              {run.job_status && <small aria-live="polite">{run.job_status[0].toUpperCase() + run.job_status.slice(1)}</small>}</> : "—"}</td>
           </tr>)}</tbody>
         </table></div> : <p className="section-note" role="status">{offset ? "No runs on this page." : "This schedule has no runs yet."}</p>}
         {(offset > 0 || data.has_more) && <footer className="pagination"><span>Page {offset / pageSize + 1}</span><div>

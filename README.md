@@ -101,6 +101,8 @@ $services.coverage.issues | Group-Object -Property operation, code | Select-Obje
 A `query_config` issue with code `access_denied` means Windows denied access
 to service configuration. The retained service entry can still provide its
 name and state. Command-based assessment requires a readable command line.
+The scan's **Coverage** tab shows the affected service, collection operation,
+and error when the agent reports those details.
 
 ### Collect all Windows inventories in one run
 
@@ -186,8 +188,11 @@ server's `PERSISTGUARD_API_URL` before starting it if the backend uses a differe
 address than `http://127.0.0.1:8000`.
 
 In a live session, admins and analysts can select **Queue scan**, find an
-approved Windows endpoint by hostname, and queue its inventory job. Select a
-queued scan to cancel it. Viewer accounts can browse scans and assessments.
+approved Windows endpoint by hostname, and queue its inventory job. The target
+picker shows the last authenticated heartbeat. Endpoints are **Connected** when
+the heartbeat is at most two minutes old. A queued scan for a disconnected
+endpoint waits for the agent to poll. Select a queued scan to cancel it. Viewer
+accounts can browse scans and assessments.
 
 Admins can also open **Endpoint onboarding** to create an invitation and copy
 its token before closing the dialog. Use the token and organization ID in the
@@ -303,6 +308,9 @@ see processed occurrences, including skips and automatic pauses.
 Queued runs link to the exact scan and show its current status. The migration
 recovers earlier scheduled jobs and the latest recorded skip or automatic pause.
 The planned time is blank for recovered entries because it was not stored.
+An open **Run history** page checks for new runs and job status changes about
+every five seconds while the tab is visible. It stays on the current page and
+shows the last successful check.
 
 ### List or cancel queued scans
 

@@ -42,13 +42,39 @@ Using the enrolled agent and its configured `--gateway-url`, `--device-key`, `--
 
 1. Run `--check-identity` and confirm the returned endpoint/organization identifiers match the approved record.
 2. Run `--heartbeat` and verify `last_seen` advances for that endpoint only.
-3. Queue a persistence scan for the approved endpoint from the dashboard.
+3. Open **Queue scan**, select the approved endpoint, and confirm it shows
+   **Connected** with the new heartbeat timestamp. Queue the persistence scan.
 4. Run `--run-inventory-job` (or `--watch-inventory-jobs` for ongoing polling), then verify the scan reaches a terminal status and its collector coverage is visible.
 5. Check that registry, scheduled-task, and service findings are attributable to the correct endpoint. A clean endpoint may legitimately produce no suspicious findings.
 6. Repeat with a second tenant or endpoint to verify no cross-tenant scan job or findings leakage.
 7. In a disposable test environment, revoke a test device credential and verify identity, heartbeat, poll, and result submission are rejected.
 
 **Never revoke a production device credential for this test.** Keep endpoint collectors read-only; no arbitrary remote shell or remediation.
+
+### Manual GUI check for Source scan updates
+
+1. With the API connected, open **Scan schedules** and create or resume a
+   test schedule for an approved Windows endpoint. Set its next run in the near
+   future and start with an empty job queue for that endpoint.
+2. Keep **Run history** open until the scheduled job appears as **Queued**.
+   Follow its scan link and select **Coverage**.
+3. In your own PowerShell terminal, run one inventory job from the repository
+   root. Use the gateway URL and enrolled device credentials from Stage 3.
+
+   ```powershell
+   Push-Location agent
+   try {
+       go run . --run-inventory-job --gateway-url $gatewayURL --device-key $deviceKey --client-cert $clientCert --server-ca $serverCA
+   } finally {
+       Pop-Location
+   }
+   ```
+
+4. Return to the same browser tab. Verify **Source scan** shows the same scan ID
+   and the terminal status from the agent receipt. **Coverage** should remain
+   selected and show the collector result without clicking **Refresh scan**.
+   The page checks about every five seconds while visible.
+5. Pause the test schedule after validation.
 
 ## Evidence and acceptance
 

@@ -39,6 +39,8 @@ app.include_router(device_enrollment_router)
 app.include_router(rotation_router)
 app.include_router(scan_schedules_router)
 
+ENDPOINT_HEARTBEAT_WINDOW = timedelta(minutes=2)
+
 
 @app.get("/healthz", tags=["Health"])
 def health() -> dict[str, str]:
@@ -243,6 +245,8 @@ class ScanJobSummary:
 class ScanTarget:
     id: UUID
     hostname: str
+    last_seen: datetime | None
+    connected: bool
 
 
 @dataclass(frozen=True)
@@ -259,15 +263,15 @@ def list_scan_targets(
     response: Response,
     query: Annotated[str, Query(max_length=253)] = "",
 ) -> ScanTargets:
-    statement = select(Endpoint.id, Endpoint.hostname).where(
+    recent = Endpoint.last_seen >= datetime.now(timezone.utc) - ENDPOINT_HEARTBEAT_WINDOW
+    statement = select(Endpoint.id, Endpoint.hostname, Endpoint.last_seen, recent.is_(True).label("connected")).where(
         Endpoint.organization_id == user.organization_id, Endpoint.status == "approved", Endpoint.os_family == "windows",
     )
     if query.strip():
         statement = statement.where(Endpoint.hostname.icontains(query.strip(), autoescape=True))
     targets = session.execute(statement.order_by(Endpoint.hostname, Endpoint.id).limit(100))
     response.headers["Cache-Control"] = "no-store"
-    return ScanTargets(user.role in {"admin", "analyst"}, user.role == "admin",
-                       [ScanTarget(row.id, row.hostname) for row in targets])
+    return ScanTargets(user.role in {"admin", "analyst"}, user.role == "admin", [ScanTarget(*row) for row in targets])
 
 
 @dataclass(frozen=True)
@@ -319,7 +323,7 @@ def workspace_snapshot(
         raise HTTPException(status_code=403, detail="No active local account")
 
     now = datetime.now(timezone.utc)
-    recent = Endpoint.last_seen >= now - timedelta(minutes=2)
+    recent = Endpoint.last_seen >= now - ENDPOINT_HEARTBEAT_WINDOW
     approved = Endpoint.status == "approved"
     endpoint_scope = Endpoint.organization_id == organization.id
     case_scope = CaseRecord.organization_id == organization.id

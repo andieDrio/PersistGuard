@@ -63,7 +63,12 @@ try {
             throw "Missing or invalid collector status: $source."
         }
         if ($collector.status -eq 'error' -and [string]::IsNullOrWhiteSpace($collector.error)) {
-            throw "Collector $source reported an error without diagnostics."
+            $coverageWithDiagnostics = @($collector.report.coverage | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_.error) -or $_.issues
+            })
+            if ($coverageWithDiagnostics.Count -eq 0) {
+                throw "Collector $source reported an error without diagnostics."
+            }
         }
         if ($collector.status -ne 'error' -and $null -eq $collector.report) {
             throw "Collector $source omitted its report."

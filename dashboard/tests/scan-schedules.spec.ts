@@ -11,6 +11,7 @@ test("analyst creates, edits, pauses and resumes a recurring Windows scan", asyn
   await page.getByRole("button", { name: "Create schedule" }).click();
   const create = page.getByRole("dialog", { name: "Create scan schedule" });
   await create.getByLabel("Endpoint", { exact: true }).selectOption({ label: "Regression fixture (bca1da67)" });
+  await expect(create.getByRole("status")).toContainText(/Connected · Last heartbeat .* SGT/);
   await create.getByLabel("Scan scope").selectOption({ label: "Windows Services" });
   await create.getByLabel("Repeat", { exact: true }).selectOption("weekly");
   await create.getByLabel("First run (local time)").fill("2038-02-08T09:30");

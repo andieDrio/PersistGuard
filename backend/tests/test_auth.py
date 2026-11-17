@@ -398,6 +398,8 @@ class AuthenticationTests(unittest.TestCase):
         self.addCleanup(engine.dispose)
         self.enterContext(patch.dict(os.environ, {"PERSISTGUARD_DATABASE_URL": TEST_DATABASE_URL}))
         org_id, other_org_id, endpoint_id, foreign_id, pending_id = [uuid4() for _ in range(5)]
+        recent_heartbeat = datetime.now(timezone.utc)
+        stale_heartbeat = recent_heartbeat - timedelta(minutes=3)
 
         def cleanup():
             with engine.begin() as connection:
@@ -410,7 +412,10 @@ class AuthenticationTests(unittest.TestCase):
             own = Organization(id=org_id, name="Scan queue test")
             other = Organization(id=other_org_id, name="Other scan queue organization")
             session.add_all([
-                Endpoint(id=endpoint_id, organization=own, hostname="ready", os_family="windows", status="approved"),
+                Endpoint(id=endpoint_id, organization=own, hostname="ready", os_family="windows", status="approved",
+                         last_seen=recent_heartbeat),
+                Endpoint(organization=own, hostname="stale", os_family="windows", status="approved", last_seen=stale_heartbeat),
+                Endpoint(organization=own, hostname="unseen", os_family="windows", status="approved"),
                 Endpoint(id=pending_id, organization=own, hostname="pending", os_family="windows"),
                 Endpoint(id=foreign_id, organization=other, hostname="foreign", os_family="windows", status="approved"),
             ])
@@ -424,13 +429,22 @@ class AuthenticationTests(unittest.TestCase):
             return {"Authorization": f"Bearer {self.token(sub=f'{name}-{endpoint_id}')}"}
 
         route = f"/api/endpoints/{endpoint_id}/scan-jobs"
+        self.assertEqual(self.client.get("/api/scan-targets").status_code, 401)
         for role, can_manage in (("admin", True), ("analyst", True), ("viewer", False)):
             targets = self.client.get("/api/scan-targets?query=READY", headers=headers(role))
             self.assertEqual(targets.status_code, 200)
-            self.assertEqual(targets.json(), {"can_manage": can_manage, "can_onboard": role == "admin",
-                                             "endpoints": [{"id": str(endpoint_id), "hostname": "ready"}]})
-        self.assertEqual(self.client.get("/api/scan-targets", headers=headers("admin")).json()["endpoints"],
-                         [{"id": str(endpoint_id), "hostname": "ready"}])
+            data = targets.json()
+            self.assertEqual((data["can_manage"], data["can_onboard"]), (can_manage, role == "admin"))
+            ready, = data["endpoints"]
+            self.assertEqual((ready["id"], ready["hostname"], ready["connected"]), (str(endpoint_id), "ready", True))
+            self.assertEqual(datetime.fromisoformat(ready["last_seen"]), recent_heartbeat)
+        endpoints = self.client.get("/api/scan-targets", headers=headers("admin")).json()["endpoints"]
+        self.assertEqual({row["hostname"]: row["connected"] for row in endpoints},
+                         {"ready": True, "stale": False, "unseen": False})
+        self.assertEqual(datetime.fromisoformat(endpoints[1]["last_seen"]), stale_heartbeat)
+        self.assertIsNone(endpoints[2]["last_seen"])
+        others = self.client.get("/api/scan-targets", headers=headers("other")).json()["endpoints"]
+        self.assertEqual([row["id"] for row in others], [str(foreign_id)])
         self.assertEqual(self.client.post(route).status_code, 401)
         self.assertEqual(self.client.post(route, headers=headers("viewer")).status_code, 403)
         self.assertEqual(self.client.post(route, headers=headers("other")).status_code, 404)

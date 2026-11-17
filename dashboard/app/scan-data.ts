@@ -23,7 +23,7 @@ export type Collector = {
   status: string;
   error?: string;
   assessments: Finding[];
-  coverage: { status?: string; error?: string; issues?: { code?: string }[] }[];
+  coverage: { status?: string; error?: string; issues?: { code?: string; name?: string; operation?: string }[] }[];
 };
 
 export type Assessment = {
