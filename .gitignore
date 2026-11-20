@@ -15,3 +15,21 @@ node_modules/
 *.pfx
 
 .local-agent-ca/
+
+# Local TLS certificates and private keys
+backend/.local-tls/
+
+# Compiled gateway executable
+gateway/*.exe
+
+# Temporary encoding backups
+*.encoding-backup
+
+# Local TLS certificates and private keys
+backend/.local-tls/
+
+# Compiled gateway executable
+gateway/*.exe
+
+# Temporary encoding backups
+*.encoding-backup

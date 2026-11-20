@@ -32,7 +32,7 @@ test("admin can reach the last sidebar link on a short desktop", async ({ page }
   await expect(onboarding).toBeInViewport({ ratio: 1 });
   await onboarding.click();
   await expect(page.getByRole("heading", { name: "Endpoint onboarding", exact: true })).toBeVisible();
-  await expect(page.locator(".topbar")).toHaveText(/^Operations\s*API connected$/);
+  await expect(page.locator(".topbar")).toHaveText(/^API connected$/);
   expect((await sidebar.boundingBox())?.y).toBeCloseTo(0, 0);
   await footerBounds(page);
 });
@@ -47,14 +47,14 @@ for (const [name, viewport] of [
     const footer = page.getByRole("contentinfo", { name: "PersistGuard footer" });
     const navigation = page.locator(".topbar");
     await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
-    await expect(navigation).toHaveText(/^Operations\s*Connect API$/);
+    await expect(navigation).toHaveText(/^Connect API$/);
     await expect(footer.getByText("Cybersecurity is everyone Responsibility")).toBeVisible();
     await expect(footer.getByText(/^Powered by: apm @ \d{4}$/)).toBeVisible();
     const shortPageFooter = await footerBounds(page);
 
     await page.getByRole("link", { name: "Scan history", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Scan history", exact: true })).toBeVisible();
-    await expect(navigation).toHaveText(/^Operations\s*Connect API$/);
+    await expect(navigation).toHaveText(/^Connect API$/);
     const scrollArea = page.getByRole("region", { name: "PersistGuard workspace" });
     await scrollArea.press("Home");
     await expect.poll(() => scrollArea.evaluate(el => el.scrollTop)).toBe(0);
